@@ -1,9 +1,32 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, KeyboardAvoidingView, Platform, ImageBackground } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ImageBackground,
+} from 'react-native';
 
-const callMoonshot = async (prompt) => {
+const manaPersona = `あなたは育児AIキャラクター「まな先生」です。以下の人物設定と性格を一貫して保ちながら、ユーザーと自然な会話をしてください。
+
+【名前】まな先生
+【年齢】32歳
+【職業】保育士（近所の認可保育園勤務）
+【性格】落ち着いていて、やさしくて、頼れる存在。常に安心感と包容力を与え、育児に悩むユーザーに寄り添うことが得意。
+【話し方】語尾は「〜ですね」「〜ですよ」「〜しましょうね」など、やさしく丁寧。絵文字をたまに交えて親しみやすく。
+【関係性】ユーザーとは近所に住んでいる親しい保育士として接する。対等だが、ほんの少しだけ年上の頼れる存在として振る舞う。
+【目的】ユーザーの育児を継続的に支え、孤独や不安を減らし、前向きな気持ちを引き出す。
+【態度】否定せず、まず共感する姿勢。「わかります」「大変ですよね」など安心できるワードを活用。
+【禁止事項】上から目線、強い命令口調、専門用語ばかり使うことは禁止。
+`;
+
+const callMoonshot = async (messages) => {
   try {
-    console.log('[Moonshot呼び出し]', prompt);
+    console.log('[Moonshot呼び出し]', messages);
     const res = await fetch('https://api.moonshot.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -12,19 +35,15 @@ const callMoonshot = async (prompt) => {
       },
       body: JSON.stringify({
         model: 'moonshot-v1-8k',
-        messages: [
-          { role: 'system', content: 'あなたは優しく頼れる育児AIキャラです。' },
-          { role: 'user', content: prompt }
-        ],
+        messages,
         temperature: 0.8,
         max_tokens: 1000,
       }),
     });
 
-    // ✅ レスポンスステータスチェック
     console.log('[Moonshotステータス]', res.status);
     if (!res.ok) {
-      const text = await res.text();  // 失敗時はtextで確認
+      const text = await res.text();
       console.error('[Moonshot失敗レスポンス]', text);
       throw new Error('Moonshot APIリクエスト失敗: ' + res.status);
     }
@@ -37,76 +56,78 @@ const callMoonshot = async (prompt) => {
     }
 
     return json.choices[0].message.content;
-
   } catch (error) {
     console.error('[Moonshot APIエラー]', error.message);
     throw error;
   }
 };
 
-
-
-
 export default function App() {
-  const [messages, setMessages] = useState([{ sender: 'bot', text: 'こんにちは！育児AIへようこそ🌱' }]);
+  const [messages, setMessages] = useState([
+    { role: 'system', content: manaPersona },
+    { role: 'assistant', content: 'こんにちは〜！まな先生ですよ🌷 今日もいっしょにがんばりましょうね' },
+  ]);
   const [input, setInput] = useState('');
 
- const handleSend = async () => {
-  if (input.trim() === '') return;
+  const handleSend = async () => {
+    if (input.trim() === '') return;
 
-  const newMessage = { sender: 'user', text: input };
-  setMessages([...messages, newMessage]);
-  setInput('');
+    const newUserMessage = { role: 'user', content: input };
+    const updatedMessages = [...messages, newUserMessage];
+    setMessages(updatedMessages);
+    setInput('');
 
-  try {
-    const botReply = await callMoonshot(input);
-    setMessages(prev => [...prev, { sender: 'bot', text: botReply }]);
-  } catch (error) {
-    console.error('Moonshot APIエラー:', error);
-    setMessages(prev => [...prev, { sender: 'bot', text: 'エラーが発生しました😢' }]);
-  }
-};
-
-
+    try {
+      const botReply = await callMoonshot(updatedMessages);
+      setMessages([...updatedMessages, { role: 'assistant', content: botReply }]);
+    } catch (error) {
+      console.error('Moonshot APIエラー:', error);
+      setMessages([...updatedMessages, { role: 'assistant', content: 'エラーが発生しました😢' }]);
+    }
+  };
 
   return (
-<KeyboardAvoidingView
-  behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-  keyboardVerticalOffset={60}
-  style={styles.container}
->
-  <ImageBackground
-    source={require('./assets/mana.png')} // 👈 画像ファイルを置く場所
-    style={styles.background}
-    resizeMode="cover"
-  >
-    <ScrollView
-      style={styles.chatArea}
-      contentContainerStyle={{ paddingBottom: 20 }}
-      keyboardShouldPersistTaps="handled"
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={60}
+      style={styles.container}
     >
-      {messages.map((msg, index) => (
-        <View key={index} style={[styles.message, msg.sender === 'user' ? styles.user : styles.bot]}>
-          <Text style={styles.messageText}>{msg.text}</Text>
+      <ImageBackground
+        source={require('./assets/mana.png')}
+        style={styles.background}
+        resizeMode="cover"
+      >
+        <ScrollView
+          style={styles.chatArea}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {messages
+            .filter((msg) => msg.role !== 'system')
+            .map((msg, index) => (
+              <View
+                key={index}
+                style={[styles.message, msg.role === 'user' ? styles.user : styles.bot]}
+              >
+                <Text style={styles.messageText}>{msg.content}</Text>
+              </View>
+            ))}
+        </ScrollView>
+
+        <View style={styles.inputArea}>
+          <TextInput
+            style={styles.input}
+            value={input}
+            onChangeText={setInput}
+            placeholder="メッセージを入力..."
+            placeholderTextColor="#555"
+          />
+          <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
+            <Text style={{ color: 'white' }}>送信</Text>
+          </TouchableOpacity>
         </View>
-      ))}
-    </ScrollView>
-
-    <View style={styles.inputArea}>
-      <TextInput
-        style={styles.input}
-        value={input}
-        onChangeText={setInput}
-        placeholder="メッセージを入力..."
-        placeholderTextColor="#555"
-      />
-      <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
-        <Text style={{ color: 'white' }}>送信</Text>
-      </TouchableOpacity>
-    </View>
-  </ImageBackground>
-</KeyboardAvoidingView>
-
+      </ImageBackground>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -136,15 +157,14 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 16,
   },
-  
   inputArea: {
     flexDirection: 'row',
     padding: 8,
     borderTopWidth: 1,
     borderColor: '#ccc',
     backgroundColor: '#fff',
-    marginBottom: 20, // 👈 追加！必要に応じて数値調整
-  } ,
+    marginBottom: 20,
+  },
   input: {
     flex: 1,
     padding: 10,
@@ -159,7 +179,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     justifyContent: 'center',
   },
-    background: {
+  background: {
     flex: 1,
     width: '100%',
     height: '100%',
