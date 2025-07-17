@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { v4 as uuidv4 } from 'uuid';
+import { InteractionManager } from 'react-native';
 
 export default function RecordScreen({ navigation }) {
     const [recordType, setRecordType] = useState('ミルク');
@@ -28,6 +29,7 @@ export default function RecordScreen({ navigation }) {
     const [bathTime, setBathTime] = useState(new Date());
     const [showBathPicker, setShowBathPicker] = useState(false);
     const [records, setRecords] = useState([]);
+    const [appReady, setAppReady] = useState(false);
 
     const saveRecord = async () => {
         console.log('🐛 saveRecord が呼ばれました');
@@ -84,38 +86,58 @@ export default function RecordScreen({ navigation }) {
         };
 
         const updated = [newRecord, ...records];
+        console.log('🧪 保存対象データ(JSON):', JSON.stringify(updated));
         setRecords(updated);
 
         try {
-            try {
-                await AsyncStorage.setItem('records', JSON.stringify(updated));
-                console.log('✅ setItem 成功');
-            } catch (e) {
-                console.error('❌ setItem エラー:', e);
-            }
+            await AsyncStorage.setItem('records', JSON.stringify(updated));
+            console.log('✅ setItem 成功');
+            // 保存直後に再取得して確認（Android検証用）
+            setTimeout(async () => {
+                const reloaded = await AsyncStorage.getItem('records');
+                console.log('🧪 setTimeoutで再取得:', reloaded);
+            }, 1000); // 1秒遅延で確認
 
-            try {
-                const verify = await AsyncStorage.getItem('records');
-                console.log('🧪 保存直後の再取得:', verify);
-            } catch (e) {
-                console.error('❌ getItem エラー:', e);
-            }
-            await loadRecords(); // ← 一時的にここだけ戻す
+            const verify = await AsyncStorage.getItem('records');
+            console.log('🧪 保存直後の再取得:', verify);
 
-            console.log('✅ 保存成功:', updated);
+            await loadRecords();
             Alert.alert('保存しました', `${recordType}の記録を保存しました！`);
+            try {
+                await AsyncStorage.setItem('testKey', JSON.stringify({ hello: 'android' }));
+                const verify = await AsyncStorage.getItem('testKey');
+                console.log('🧪 testKey確認（Android）:', verify);
+            } catch (e) {
+                console.error('❌ testKey保存失敗:', e);
+            }
+
+            // この後、入力値初期化してOK
+            setAmount('');
+            setNote('');
+            setStyle('');
+            setMenu('');
+            setTemp('');
         } catch (err) {
-            console.error('❌ AsyncStorage 保存失敗:', err.message);
+            console.error('❌ AsyncStorage 保存失敗:', err);
+            Alert.alert('保存失敗', 'データの保存に失敗しました');
         }
 
         setAmount(''); setNote(''); setStyle(''); setMenu(''); setTemp('');
-
     };
-
+    const testAsyncStorage = async () => {
+        const dummy = [{ id: '1', type: 'ミルク', time: new Date().toLocaleString(), data: { amount: 100, note: 'test' } }];
+        try {
+            await AsyncStorage.setItem('records', JSON.stringify(dummy));
+            const result = await AsyncStorage.getItem('records');
+            console.log('🧪 手動保存確認:', result);
+        } catch (e) {
+            console.error('❌ 手動保存失敗:', e);
+        }
+    };
     const loadRecords = async () => {
         try {
             const data = await AsyncStorage.getItem('records');
-            console.log("🧪 AsyncStorageから取得したdata:", data); // ← ここ確認
+            console.log("🧪 AsyncStorageから取得したdata:", data);
             const parsed = JSON.parse(data) || [];
             const cleaned = parsed.filter(item => item && typeof item === 'object');
             const normalized = cleaned.map(item => {
@@ -125,17 +147,15 @@ export default function RecordScreen({ navigation }) {
                         id,
                         type,
                         time,
-                        data: {
-                            amount, note, style, menu, temp, start, end, ...rest
-                        },
+                        data: { amount, note, style, menu, temp, start, end, ...rest },
                     };
                 }
                 return item;
             });
-            console.log("🧪 正規化されたrecords:", normalized); // ← ここでrecordsが空か要確認
+            console.log("🧪 正規化されたrecords:", normalized);
             setRecords(normalized);
         } catch (err) {
-            console.error('❌ AsyncStorage 保存失敗:', err); // ← .message ではなく err 全体を出す
+            console.error('❌ AsyncStorage 保存失敗:', err);
             Alert.alert('保存失敗', 'データの保存に失敗しました');
         }
     };
@@ -183,21 +203,34 @@ export default function RecordScreen({ navigation }) {
     };
 
     useEffect(() => {
-        const testStorage = async () => {
-            try {
-                await AsyncStorage.setItem('testKey', JSON.stringify({ hello: 'world' }));
-                const testData = await AsyncStorage.getItem('testKey');
-                console.log('🧪 テスト保存データ:', testData);
-            } catch (err) {
-                console.error('❌ AsyncStorage テスト失敗:', err);
-            }
-        };
-        testStorage();
-    }, []);
-    useEffect(() => {
-        console.log('🌀 useEffect 初期化開始');
         loadRecords();
     }, []);
+    useEffect(() => {
+        const testSave = async () => {
+            try {
+                await AsyncStorage.setItem('testSave', JSON.stringify({ hello: 'android!' }));
+                const result = await AsyncStorage.getItem('testSave');
+                console.log('🧪 testSave 保存 → 取得:', result);
+            } catch (e) {
+                console.error('❌ testSave 保存失敗:', e);
+            }
+        };
+        testSave();
+    }, []);
+    useEffect(() => {
+        InteractionManager.runAfterInteractions(() => {
+            setAppReady(true);
+        });
+    }, []);
+
+    if (!appReady) {
+        return (
+            <View style={styles.container}>
+                <Text>⏳ 準備中...</Text>
+            </View>
+        );
+    }
+
     return (
         <View style={styles.container}>
             <Text style={styles.header}>📋 記録入力</Text>
@@ -221,9 +254,6 @@ export default function RecordScreen({ navigation }) {
                         data={records}
                         keyExtractor={(item, index) => item?.id || index.toString()}
                         renderItem={({ item }) => {
-                            console.log("🧪 item:", JSON.stringify(item, null, 2));
-                            console.log("🧪 record item (確認用):", JSON.stringify(item, null, 2));
-                            console.log("🖨 record item:", item);
                             const recordData = item.data || {};
                             return (
                                 <View style={styles.item}>
