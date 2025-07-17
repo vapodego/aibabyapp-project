@@ -12,6 +12,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { InteractionManager } from 'react-native';
 
@@ -32,112 +33,63 @@ export default function RecordScreen({ navigation }) {
     const [appReady, setAppReady] = useState(false);
 
     const saveRecord = async () => {
-        console.log('🐛 saveRecord が呼ばれました');
-        console.log('📋 recordType:', recordType);
-        console.log('📥 入力値:', { amount, note, style, temp, menu });
-
+        const now = new Date();
         let data = {};
 
         switch (recordType) {
             case 'ミルク':
-                if (!amount.trim()) {
-                    Alert.alert('エラー', '量（ml）を入力してください');
-                    return;
-                }
                 data = { amount, note };
                 break;
             case '排泄':
-                if (!style.trim()) {
-                    Alert.alert('エラー', '排泄スタイルを入力してください');
-                    return;
-                }
                 data = { style, note };
                 break;
             case '睡眠':
-                data = { start: startTime.toLocaleString(), end: endTime.toLocaleString(), note };
+                data = {
+                    start: startTime.toLocaleTimeString(),
+                    end: endTime.toLocaleTimeString(),
+                    note
+                };
                 break;
             case '離乳食':
-                if (!menu.trim() || !amount.trim()) {
-                    Alert.alert('エラー', '食べたものと量を入力してください');
-                    return;
-                }
                 data = { menu, amount, note };
                 break;
             case '体温':
-                if (!temp.trim()) {
-                    Alert.alert('エラー', '体温を入力してください');
-                    return;
-                }
                 data = { temp, note };
                 break;
             case '入浴':
-                data = { time: bathTime.toLocaleString(), note };
+                data = {
+                    time: bathTime.toLocaleTimeString(),
+                    note
+                };
                 break;
             default:
-                Alert.alert('不明な記録タイプ');
-                return;
+                data = { note };
+                break;
         }
 
         const newRecord = {
             id: uuidv4(),
             type: recordType,
-            time: new Date().toLocaleString(),
-            data,
+            time: now.toLocaleString(),
+            data
         };
 
-        const updated = [newRecord, ...records];
-        console.log('🧪 保存対象データ(JSON):', JSON.stringify(updated));
-        setRecords(updated);
-
         try {
-            await AsyncStorage.setItem('records', JSON.stringify(updated));
-            console.log('✅ setItem 成功');
-            // 保存直後に再取得して確認（Android検証用）
-            setTimeout(async () => {
-                const reloaded = await AsyncStorage.getItem('records');
-                console.log('🧪 setTimeoutで再取得:', reloaded);
-            }, 1000); // 1秒遅延で確認
-
-            const verify = await AsyncStorage.getItem('records');
-            console.log('🧪 保存直後の再取得:', verify);
-
+            const existing = await AsyncStorage.getItem('records');
+            const parsed = existing ? JSON.parse(existing) : [];
+            const updated = [...parsed, newRecord];
+            const stringified = JSON.stringify(updated);
+            await AsyncStorage.setItem('records', stringified);
             await loadRecords();
-            Alert.alert('保存しました', `${recordType}の記録を保存しました！`);
-            try {
-                await AsyncStorage.setItem('testKey', JSON.stringify({ hello: 'android' }));
-                const verify = await AsyncStorage.getItem('testKey');
-                console.log('🧪 testKey確認（Android）:', verify);
-            } catch (e) {
-                console.error('❌ testKey保存失敗:', e);
-            }
-
-            // この後、入力値初期化してOK
-            setAmount('');
-            setNote('');
-            setStyle('');
-            setMenu('');
-            setTemp('');
-        } catch (err) {
-            console.error('❌ AsyncStorage 保存失敗:', err);
-            Alert.alert('保存失敗', 'データの保存に失敗しました');
-        }
-
-        setAmount(''); setNote(''); setStyle(''); setMenu(''); setTemp('');
-    };
-    const testAsyncStorage = async () => {
-        const dummy = [{ id: '1', type: 'ミルク', time: new Date().toLocaleString(), data: { amount: 100, note: 'test' } }];
-        try {
-            await AsyncStorage.setItem('records', JSON.stringify(dummy));
-            const result = await AsyncStorage.getItem('records');
-            console.log('🧪 手動保存確認:', result);
+            Alert.alert('成功', '新しい記録を保存しました');
         } catch (e) {
-            console.error('❌ 手動保存失敗:', e);
+            Alert.alert('失敗', '保存に失敗しました');
         }
     };
+
     const loadRecords = async () => {
         try {
             const data = await AsyncStorage.getItem('records');
-            console.log("🧪 AsyncStorageから取得したdata:", data);
             const parsed = JSON.parse(data) || [];
             const cleaned = parsed.filter(item => item && typeof item === 'object');
             const normalized = cleaned.map(item => {
@@ -152,10 +104,9 @@ export default function RecordScreen({ navigation }) {
                 }
                 return item;
             });
-            console.log("🧪 正規化されたrecords:", normalized);
+            normalized.sort((a, b) => new Date(b.time) - new Date(a.time));
             setRecords(normalized);
         } catch (err) {
-            console.error('❌ AsyncStorage 保存失敗:', err);
             Alert.alert('保存失敗', 'データの保存に失敗しました');
         }
     };
@@ -205,18 +156,7 @@ export default function RecordScreen({ navigation }) {
     useEffect(() => {
         loadRecords();
     }, []);
-    useEffect(() => {
-        const testSave = async () => {
-            try {
-                await AsyncStorage.setItem('testSave', JSON.stringify({ hello: 'android!' }));
-                const result = await AsyncStorage.getItem('testSave');
-                console.log('🧪 testSave 保存 → 取得:', result);
-            } catch (e) {
-                console.error('❌ testSave 保存失敗:', e);
-            }
-        };
-        testSave();
-    }, []);
+
     useEffect(() => {
         InteractionManager.runAfterInteractions(() => {
             setAppReady(true);
