@@ -1,0 +1,1 @@
+// RecordItem component
