@@ -1,0 +1,8 @@
+# GCP credential file
+google-credentials.json
+
+# OS-specific files
+.DS_Store
+
+# Node modules
+node_modules/s

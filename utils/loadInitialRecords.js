@@ -1,34 +1,20 @@
-// loadInitialRecords.js
-import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = 'childcare_records';
-const ASSET_PATH = require('../assets/data/childcare_records_10days.json');
+// childcare_records_1year.json ファイルをインポート
+// ファイルをプロジェクトのルートディレクトリにある 'assets/data' フォルダに配置してください
+const sampleData = require('../assets/data/childcare_records_1year.json'); 
 
 export const loadInitialRecords = async () => {
-  try {
-    const existing = await AsyncStorage.getItem(STORAGE_KEY);
-    if (existing !== null) {
-      console.log('✅ 初期データの読み込みはスキップされました（既に存在）');
-      return;
+    try {
+        const rawData = await AsyncStorage.getItem('records');
+        if (!rawData || JSON.parse(rawData).length === 0) {
+            // AsyncStorageが空の場合、または空配列の場合にのみサンプルデータを読み込む
+            console.log("✅ AsyncStorageが空のため、初期サンプルデータを読み込み、保存します。");
+            await AsyncStorage.setItem('records', JSON.stringify(sampleData));
+        } else {
+            console.log("✅ AsyncStorageに既存データがあるため、初期サンプルデータの読み込みはスキップされました。");
+        }
+    } catch (e) {
+        console.error('❌ 初期データの読み込みまたは保存エラー:', e);
     }
-
-    const asset = Asset.fromModule(ASSET_PATH);
-    await asset.downloadAsync();
-
-    const jsonStr = await FileSystem.readAsStringAsync(asset.localUri);
-    const parsedRecords = JSON.parse(jsonStr);
-
-    // 簡易バリデーション：各レコードに必須項目があるかチェック
-    const validatedRecords = parsedRecords.filter((record) =>
-      record.id && record.type && record.time && record.data
-    );
-
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(validatedRecords));
-    console.log(`📥 ${validatedRecords.length}件の初期育児記録を保存しました`);
-
-  } catch (error) {
-    console.error('❌ 初期データ読み込みエラー:', error);
-  }
 };

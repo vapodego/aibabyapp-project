@@ -32,7 +32,7 @@ const callMoonshot = async (messages) => {
     const res = await fetch('https://api.moonshot.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: 'Bearer sk-xxxx', // ←あなたのAPIキーに置き換えてください
+        Authorization: 'Bearer sk-aQ25cqdGil3eIOmyRt6l4VJiOHwcmx1is1oC4gi8gc6ydFNh', // ←あなたのAPIキーに置き換えてください
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

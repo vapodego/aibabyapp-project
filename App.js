@@ -10,6 +10,7 @@ const Stack = createNativeStackNavigator();
 
 export default function App() {
   useEffect(() => {
+    // アプリ起動時に初期データをロード（AsyncStorageにデータがなければJSONからロード）
     loadInitialRecords();
   }, []);
   return (
