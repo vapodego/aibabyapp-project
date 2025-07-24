@@ -6,11 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  ImageBackground,
+  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
-  ImageBackground,
   Button,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 const manaPersona = `あなたは育児AIキャラクター「まな先生」です。以下の人物設定と性格を一貫して保ちながら、ユーザーと自然な会話をしてください。
 
@@ -30,7 +32,7 @@ const callMoonshot = async (messages) => {
     const res = await fetch('https://api.moonshot.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer sk-aQ25cqdGil3eIOmyRt6l4VJiOHwcmx1is1oC4gi8gc6ydFNh',
+        Authorization: 'Bearer sk-aQ25cqdGil3eIOmyRt6l4VJiOHwcmx1is1oC4gi8gc6ydFNh', // ←あなたのAPIキーに置き換えてください
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -40,17 +42,12 @@ const callMoonshot = async (messages) => {
         max_tokens: 1000,
       }),
     });
-
     const json = await res.json();
-
-    if (!json.choices || !json.choices[0] || !json.choices[0].message) {
-      throw new Error('返答が空または構造不正');
-    }
-
+    if (!json.choices?.[0]?.message) throw new Error('返答が空');
     return json.choices[0].message.content;
-  } catch (error) {
-    console.error('[Moonshot APIエラー]', error.message);
-    throw error;
+  } catch (e) {
+    console.error('Moonshotエラー:', e);
+    return 'エラーが発生しました😢';
   }
 };
 
@@ -62,71 +59,86 @@ export default function ChatScreen({ navigation }) {
   const [input, setInput] = useState('');
 
   const handleSend = async () => {
-    if (input.trim() === '') return;
-
-    const newUserMessage = { role: 'user', content: input };
-    const updatedMessages = [...messages, newUserMessage];
-    setMessages(updatedMessages);
+    if (!input.trim()) return;
+    const newMsg = { role: 'user', content: input };
+    const updated = [...messages, newMsg];
+    setMessages(updated);
     setInput('');
-
-    try {
-      const botReply = await callMoonshot(updatedMessages);
-      setMessages([...updatedMessages, { role: 'assistant', content: botReply }]);
-    } catch (error) {
-      setMessages([...updatedMessages, { role: 'assistant', content: 'エラーが発生しました😢' }]);
-    }
+    const reply = await callMoonshot(updated);
+    setMessages([...updated, { role: 'assistant', content: reply }]);
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={60}
-      style={styles.container}
-    >
-      <ImageBackground
-        source={require('../assets/mana.png')}
-        style={styles.background}
-        resizeMode="cover"
+    <SafeAreaView style={styles.container}>
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.scrollContainer}
+        extraScrollHeight={100}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          style={styles.chatArea}
-          contentContainerStyle={{ paddingBottom: 20 }}
-          keyboardShouldPersistTaps="handled"
+        {/* 🧭 ナビゲーション */}
+        <View style={styles.navTop}>
+          <Button title="育児記録画面に戻る" onPress={() => navigation.navigate('Record')} />
+        </View>
+
+        {/* 🖼 画像とチャット */}
+        <ImageBackground
+          source={require('../assets/mana.png')}
+          style={styles.background}
+          resizeMode="contain"
         >
-          {messages
-            .filter((msg) => msg.role !== 'system')
-            .map((msg, index) => (
+          <View style={styles.chatOverlay}>
+            {messages.filter(m => m.role !== 'system').map((msg, idx) => (
               <View
-                key={index}
+                key={idx}
                 style={[styles.message, msg.role === 'user' ? styles.user : styles.bot]}
               >
                 <Text style={styles.messageText}>{msg.content}</Text>
               </View>
             ))}
-        </ScrollView>
+          </View>
+        </ImageBackground>
 
+        {/* 🔖 今日のおすすめ */}
+        <View style={styles.recommendationContainer}>
+          <Text style={styles.sectionTitle}>今日のおすすめ</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🎈 絵本の読み聞かせ</Text>
+              <Text style={styles.cardText}>10:30〜 中川西地区センター</Text>
+            </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🍳 献立（UIのみ）</Text>
+              <Text style={styles.cardText}>親子丼・にんじんグラッセ</Text>
+            </View>
+          </ScrollView>
+        </View>
+
+        {/* 🎯 アクションボタン */}
+        <View style={styles.actions}>
+          <TouchableOpacity style={styles.actionButton}>
+            <Text style={styles.actionLabel}>イベント検索</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Record')}>
+            <Text style={styles.actionLabel}>記録する</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 📝 入力欄 */}
         <View style={styles.inputArea}>
           <TextInput
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder="メッセージを入力..."
-            placeholderTextColor="#555"
+            placeholder="まな先生に話しかける..."
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
           />
           <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
             <Text style={{ color: 'white' }}>送信</Text>
           </TouchableOpacity>
         </View>
-
-        {/* ✅ ここが遷移ボタンです */}
-        <View style={styles.navButton}>
-          <Button
-            title="育児記録画面に戻る"
-            onPress={() => navigation.navigate('Record')}
-          />
-        </View>
-      </ImageBackground>
-    </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -135,56 +147,102 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFF8F0',
   },
-  chatArea: {
-    flex: 1,
+  scrollContainer: {
+    paddingBottom: 20,
+  },
+  navTop: {
+    padding: 10,
+    backgroundColor: '#fff',
+  },
+  background: {
+    width: '100%',
+    height: 300,
+  },
+  chatOverlay: {
+    position: 'absolute',
+    top: 0,
+    height: '100%',
+    width: '100%',
     padding: 16,
+    justifyContent: 'flex-end',
   },
   message: {
     marginBottom: 10,
     maxWidth: '80%',
     padding: 10,
     borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.8)',
   },
   user: {
     alignSelf: 'flex-end',
-    backgroundColor: '#DCF8C6',
+    backgroundColor: 'rgba(200,255,200,0.9)',
   },
   bot: {
     alignSelf: 'flex-start',
-    backgroundColor: '#EEE',
   },
   messageText: {
     fontSize: 16,
   },
+  recommendationContainer: {
+    marginTop: 10,
+    paddingLeft: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  card: {
+    backgroundColor: '#faf0e6',
+    borderRadius: 12,
+    padding: 16,
+    marginRight: 12,
+    width: 240,
+  },
+  cardTitle: {
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  cardText: {
+    marginTop: 6,
+    fontSize: 14,
+  },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 20,
+  },
+  actionButton: {
+    backgroundColor: '#ffb6c1',
+    padding: 12,
+    borderRadius: 10,
+  },
+  actionLabel: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
   inputArea: {
     flexDirection: 'row',
-    padding: 8,
+    alignItems: 'center',
     borderTopWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#ddd',
+    padding: 8,
     backgroundColor: '#fff',
-    marginBottom: 20,
+    marginHorizontal: 10,
+    marginTop: 10,
+    borderRadius: 8,
   },
   input: {
     flex: 1,
+    backgroundColor: '#f2f2f2',
     padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 20,
+    borderRadius: 8,
+    marginRight: 8,
   },
   sendButton: {
-    marginLeft: 8,
     backgroundColor: '#6C63FF',
-    borderRadius: 20,
     paddingVertical: 10,
-    paddingHorizontal: 16,
-    justifyContent: 'center',
-  },
-  background: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  navButton: {
-    padding: 16,
-    backgroundColor: '#fff8f0',
+    paddingHorizontal: 14,
+    borderRadius: 8,
   },
 });
