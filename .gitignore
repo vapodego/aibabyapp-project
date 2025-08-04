@@ -1,0 +1,22 @@
+# Node / npm
+node_modules/
+npm-debug.log
+
+# Expo / React Native
+.expo/
+dist/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Firebase
+.firebase/
+firebase-debug.log
+.runtimeconfig.json
+
+# IDE / OS specific
+.idea/
+.vscode/
+*.DS_Store
