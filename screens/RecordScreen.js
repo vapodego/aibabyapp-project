@@ -1,4 +1,4 @@
-// This is a dummy comment to force re-bundling. (2025-07-23 13:58 JST)
+// This is a dummy comment to force re-bundling. (2025-07-23 14:20 JST)
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -29,7 +29,7 @@ const screenWidth = Dimensions.get('window').width;
 
 const ICONS = {
     ミルク: '🍼', うんち: '💩', おしっこ: '💧', 寝る: '😴', 起きる: '☀️', 離乳食: '🍚',
-    体温: '🌡️', 入浴: '🛁', その他: '➕',
+    体温: '🌡️', 身長: '📏', 体重: '⚖️', 入浴: '🛁', その他: '➕',
 };
 
 // --- Helper Functions (from original) ---
@@ -104,12 +104,65 @@ const getPast7DayAverage = (allRecords, currentDisplayDate) => {
     };
 };
 
-// --- Components (from original) ---
-const RecordInputForm = ({ onSave, onClose, recordType }) => {
+// ★★★ 変更点: 完全な入力フォームコンポーネントを復元 ★★★
+const RecordInputForm = ({
+    recordType, amount, setAmount, note, setNote,
+    poopConsistency, setPoopConsistency,
+    menu, setMenu, temp, setTemp,
+    height, setHeight, weight, setWeight,
+    onSave, onClose
+}) => {
+    const renderInputFields = () => {
+        switch (recordType) {
+            case 'ミルク':
+                return (<>
+                    <TextInput placeholder="量（ml）" value={amount} onChangeText={setAmount} keyboardType="numeric" style={styles.input} />
+                    <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />
+                </>);
+            case 'うんち':
+                return (<>
+                    <Picker selectedValue={poopConsistency} onValueChange={(itemValue) => setPoopConsistency(itemValue)} style={[styles.input, { width: '100%' }]}>
+                        <Picker.Item label="硬" value="硬" /><Picker.Item label="普" value="普" /><Picker.Item label="柔" value="柔" /><Picker.Item label="水っぽい" value="水っぽい" />
+                    </Picker>
+                    <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />
+                </>);
+            case '身長':
+                return (<>
+                    <TextInput placeholder="身長（cm）" value={height} onChangeText={setHeight} keyboardType="numeric" style={styles.input} />
+                    <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />
+                </>);
+            case '体重':
+                return (<>
+                    <TextInput placeholder="体重（kg）" value={weight} onChangeText={setWeight} keyboardType="numeric" style={styles.input} />
+                    <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />
+                </>);
+            case 'おしっこ':
+                 return <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />;
+            case '寝る':
+            case '起きる':
+                return <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />;
+            case '離乳食':
+                return (<>
+                    <TextInput placeholder="食べたもの" value={menu} onChangeText={setMenu} style={styles.input} />
+                    <TextInput placeholder="量（g）" value={amount} onChangeText={setAmount} keyboardType="numeric" style={styles.input} />
+                    <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />
+                </>);
+            case '体温':
+                return (<>
+                    <TextInput placeholder="体温（℃）" value={temp} onChangeText={setTemp} keyboardType="numeric" style={styles.input} />
+                    <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />
+                </>);
+            case '入浴':
+                 return <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />;
+            default:
+                return <TextInput placeholder="メモ" value={note} onChangeText={setNote} style={styles.input} />;
+        }
+    };
+
     return (
         <View style={[styles.modalContent, { alignSelf: 'stretch' }]}>
             <Text style={styles.modalTitle}>📋 {recordType}の記録</Text>
-            <Text>（入力フォームはここに表示されます）</Text>
+            {renderInputFields()}
             <Button title="記録する" onPress={onSave} />
             <View style={{ marginTop: 10 }}><Button title="キャンセル" onPress={onClose} color="#888" /></View>
         </View>
@@ -136,6 +189,16 @@ export default function RecordScreen({ navigation }) {
     const [age, setAge] = useState('4ヶ月10日');
     const [showRecordModal, setShowRecordModal] = useState(false);
     const [modalRecordType, setModalRecordType] = useState('ミルク');
+    const [showDatePicker, setShowDatePicker] = useState(false);
+
+    // Modal Form State
+    const [amount, setAmount] = useState('');
+    const [note, setNote] = useState('');
+    const [poopConsistency, setPoopConsistency] = useState('普');
+    const [menu, setMenu] = useState('');
+    const [temp, setTemp] = useState('');
+    const [height, setHeight] = useState('');
+    const [weight, setWeight] = useState('');
 
     // Voice related state
     const [recording, setRecording] = useState(null);
@@ -155,8 +218,6 @@ export default function RecordScreen({ navigation }) {
             const recordsToLoad = rawData ? JSON.parse(rawData) : [];
             const cleaned = recordsToLoad.filter(item => item && item.id && item.time)
                 .map(item => (!item.data ? { ...item, data: { ...item } } : item));
-            // ★★★ 変更点: ここでのソートは不要なので削除 ★★★
-            // cleaned.sort((a, b) => new Date(b.time) - new Date(a.time));
             setRecords(cleaned);
         } catch (err) {
             Alert.alert('エラー', 'データの読み込みに失敗しました。');
@@ -169,11 +230,26 @@ export default function RecordScreen({ navigation }) {
             const updated = [...(existing ? JSON.parse(existing) : []), recordToSave];
             await AsyncStorage.setItem('records', JSON.stringify(updated));
             await loadRecords();
-            // ★★★ 変更点: 成功時のアラートをコメントアウト ★★★
-            // Alert.alert('成功', `${recordToSave.type}の記録を保存しました`);
         } catch (e) {
             Alert.alert('失敗', '記録の保存に失敗しました');
         }
+    };
+    
+    const saveManualRecord = () => {
+        const now = new Date();
+        let data = {};
+        switch (modalRecordType) {
+            case 'ミルク': data = { amount, note }; break;
+            case 'うんち': data = { consistency: poopConsistency, note }; break;
+            case '離乳食': data = { menu, amount, note }; break;
+            case '体温': data = { temp, note }; break;
+            case '身長': data = { height, note }; break;
+            case '体重': data = { weight, note }; break;
+            default: data = { note };
+        }
+        const newRecord = { id: Date.now().toString(), type: modalRecordType, time: now.toISOString(), data };
+        saveNewRecord(newRecord);
+        setShowRecordModal(false);
     };
 
     const clearAllRecords = () => {
@@ -187,7 +263,7 @@ export default function RecordScreen({ navigation }) {
                     onPress: async () => {
                         try {
                             await AsyncStorage.removeItem('records');
-                            setRecords([]);
+                            setRecords([]); // ★★★ 変更点: UIを即時更新 ★★★
                             Alert.alert('成功', 'すべての記録を削除しました。');
                         } catch (e) {
                             Alert.alert('失敗', '記録の削除に失敗しました。');
@@ -248,7 +324,7 @@ export default function RecordScreen({ navigation }) {
                     encoding: FileSystem.EncodingType.Base64,
                 });
                 
-                console.log("� 音声データをBase64で送信中...");
+                console.log("🎧 音声データをBase64で送信中...");
                 ws.current.send(JSON.stringify({ audio: base64Audio }));
 
             } catch (error) {
@@ -294,7 +370,7 @@ export default function RecordScreen({ navigation }) {
             現在の時刻は「${currentDate}」です。これを基準に時間を解釈してください。
             もし発話に時刻の指定がなければ、必ずこの現在時刻を使用してください。
             時間は「YYYY-MM-DDTHH:mm:ss.sssZ」のISO 8601形式で出力してください。
-            記録の種類(type)は「ミルク」「うんち」「おしっこ」「寝る」「起きる」「離乳食」「体温」「入浴」「その他」のいずれかです。
+            記録の種類(type)は「ミルク」「うんち」「おしっこ」「寝る」「起きる」「離乳食」「体温」「身長」「体重」「入浴」「その他」のいずれかです。
             
             # 発話内容:
             "${text}"
@@ -305,39 +381,50 @@ export default function RecordScreen({ navigation }) {
               "time": "解釈したISO 8601形式の時間",
               "data": {
                 "amount": "量(mlやgなど)",
-                "note": "メモ"
+                "note": "メモ",
+                "height": "身長(cm)",
+                "weight": "体重(kg)"
               }
             }
         `;
+        
+        const apiKey = "AIzaSyDr-pOhBgVIcEaWWlwYu1jSQoO2uPlU-qk"; // ★★★ TODO: Gemini APIキーは環境変数等から設定してください ★★★
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+        const payload = {
+            contents: [{ parts: [{ text: prompt }] }],
+             generationConfig: {
+                responseMimeType: "application/json",
+             }
+        };
+
         try {
-            const res = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+            const res = await fetch(apiUrl, {
                 method: 'POST',
-                headers: { 
-                    'Authorization': 'Bearer sk-aQ25cqdGil3eIOmyRt6l4VJiOHwcmx1is1oC4gi8gc6ydFNh', // TODO: Add your API Key
-                    'Content-Type': 'application/json', 
-                },
-                body: JSON.stringify({ model: 'moonshot-v1-8k', messages: [{ role: 'system', content: prompt }], temperature: 0.3, }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
 
             if (!res.ok) {
-                const errorBody = await res.text();
-                throw new Error(`APIリクエスト失敗: ${res.status} ${errorBody}`);
+                const errorBody = await res.json();
+                console.error("API Error Response:", errorBody);
+                throw new Error(`APIリクエスト失敗: ${res.status}`);
             }
 
-            const json = await res.json();
+            const result = await res.json();
 
-            if (json && json.choices && json.choices.length > 0 && json.choices[0].message && json.choices[0].message.content) {
-                const content = json.choices[0].message.content;
+            if (result.candidates && result.candidates.length > 0 &&
+                result.candidates[0].content && result.candidates[0].content.parts &&
+                result.candidates[0].content.parts.length > 0) {
+                
+                const content = result.candidates[0].content.parts[0].text;
                 console.log("LLMからの解析結果:", content);
                 
-                const jsonString = content.match(/\{.*\}/s);
-                if (!jsonString) {
-                    throw new Error("LLMから有効なJSONが返されませんでした。");
-                }
-                const parsedJson = JSON.parse(jsonString[0]);
+                const parsedJson = JSON.parse(content);
                 setParsedRecord({ id: Date.now().toString(), ...parsedJson });
                 setShowConfirmModal(true);
             } else {
+                 console.warn("Geminiからの応答が予期しない形式です:", result);
                 throw new Error("LLMから予期しない形式の応答がありました。");
             }
 
@@ -364,7 +451,20 @@ export default function RecordScreen({ navigation }) {
 
     const openRecordModal = (type) => {
         setModalRecordType(type);
+        setAmount('');
+        setNote('');
+        setPoopConsistency('普');
+        setMenu('');
+        setTemp('');
+        setHeight('');
+        setWeight('');
         setShowRecordModal(true);
+    };
+
+    const onDateChange = (event, selectedDate) => {
+        const newDate = selectedDate || currentDisplayDate;
+        setShowDatePicker(Platform.OS === 'ios');
+        setCurrentDisplayDate(newDate);
     };
 
     // --- Effects ---
@@ -411,9 +511,20 @@ export default function RecordScreen({ navigation }) {
 
             <View style={styles.dateNavigation}>
                 <TouchableOpacity onPress={() => setCurrentDisplayDate(d => new Date(d.setDate(d.getDate() - 1)))} style={styles.dateNavButton}><Text style={styles.dateNavButtonText}>◀️ 前日</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => {}}><Text style={styles.date}>{today}{isToday ? ' (今日)' : ''}</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowDatePicker(true)}><Text style={styles.date}>{today}{isToday ? ' (今日)' : ''}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => setCurrentDisplayDate(d => new Date(d.setDate(d.getDate() + 1)))} style={styles.dateNavButton}><Text style={styles.dateNavButtonText}>翌日 ▶️</Text></TouchableOpacity>
             </View>
+            
+            {showDatePicker && (
+                <DateTimePicker
+                    testID="dateTimePicker"
+                    value={currentDisplayDate}
+                    mode="date"
+                    is24Hour={true}
+                    display="default"
+                    onChange={onDateChange}
+                />
+            )}
 
             <ScrollView style={styles.mainContentScrollView}>
                 <View style={styles.timelineContainer}>
@@ -424,7 +535,6 @@ export default function RecordScreen({ navigation }) {
                             data={Array.from({ length: 24 }, (_, i) => i)}
                             keyExtractor={(hour) => hour.toString()}
                             renderItem={({ item: hour }) => {
-                                // ★★★ 変更点: 時間内の記録を昇順（古い順）にソート ★★★
                                 const recordsInThisHour = todayRecords
                                     .filter(r => getHourFromDateTimeString(r.time) === hour)
                                     .sort((a, b) => new Date(a.time) - new Date(b.time));
@@ -440,6 +550,8 @@ export default function RecordScreen({ navigation }) {
                                                         <Text style={styles.timelineRecordContent}>
                                                             {`${ICONS[record.type] ?? '📘'} ${record.type}`}
                                                             {record.data.amount ? ` 📦 ${record.data.amount}` : ''}
+                                                            {record.data.height ? ` 📏 ${record.data.height} cm` : ''}
+                                                            {record.data.weight ? ` ⚖️ ${record.data.weight} kg` : ''}
                                                             {record.data.note ? ` 📝 ${record.data.note}` : ''}
                                                         </Text>
                                                     </View>
@@ -476,7 +588,20 @@ export default function RecordScreen({ navigation }) {
             </View>
             
             <Modal animationType="slide" transparent={true} visible={showRecordModal} onRequestClose={() => setShowRecordModal(false)}>
-                <View style={styles.centeredView}><RecordInputForm recordType={modalRecordType} onSave={() => {}} onClose={() => setShowRecordModal(false)} /></View>
+                <View style={styles.centeredView}>
+                    <RecordInputForm
+                        recordType={modalRecordType}
+                        amount={amount} setAmount={setAmount}
+                        note={note} setNote={setNote}
+                        poopConsistency={poopConsistency} setPoopConsistency={setPoopConsistency}
+                        menu={menu} setMenu={setMenu}
+                        temp={temp} setTemp={setTemp}
+                        height={height} setHeight={setHeight}
+                        weight={weight} setWeight={setWeight}
+                        onSave={saveManualRecord}
+                        onClose={() => setShowRecordModal(false)}
+                    />
+                </View>
             </Modal>
             
             {isProcessingVoice && (
@@ -500,6 +625,8 @@ export default function RecordScreen({ navigation }) {
                                 <Text style={styles.confirmText}>種類: {ICONS[parsedRecord.type] || '❓'} {parsedRecord.type}</Text>
                                 <Text style={styles.confirmText}>時間: {new Date(parsedRecord.time).toLocaleString('ja-JP')}</Text>
                                 {parsedRecord.data?.amount && <Text style={styles.confirmText}>量: {parsedRecord.data.amount}</Text>}
+                                {parsedRecord.data?.height && <Text style={styles.confirmText}>身長: {parsedRecord.data.height} cm</Text>}
+                                {parsedRecord.data?.weight && <Text style={styles.confirmText}>体重: {parsedRecord.data.weight} kg</Text>}
                                 {parsedRecord.data?.note && <Text style={styles.confirmText}>メモ: {parsedRecord.data.note}</Text>}
                             </View>
                         )}
@@ -571,6 +698,7 @@ const styles = StyleSheet.create({
     modalView: { margin: 16, backgroundColor: 'white', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4, width: '90%', maxHeight: '75%' },
     modalContent: { width: '100%', alignItems: 'center' },
     modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: '#333' },
+    input: { backgroundColor: '#f0f0f0', borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 20, width: '100%' },
     currentTimeLine: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: 'red', zIndex: 1 },
     micButton: { position: 'absolute', bottom: 80, right: 20, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 32, padding: 6, zIndex: 100 },
     processingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
