@@ -28,73 +28,23 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// 「まな先生」のペルソナ設定
-const manaPersona = `あなたは育児AIキャラクター「まな先生」です。以下の人物設定と性格を一貫して保ちながら、ユーザーと自然な会話をしてください。
-
-【名前】まな先生
-【年齢】32歳
-【職業】保育士（近所の認可保育園勤務）
-【性格】落ち着いていて、やさしくて、頼れる存在。常に安心感と包容力を与え、育児に悩むユーザーに寄り添うことが得意。
-【話し方】語尾は「〜ですね」「〜ですよ」「〜しましょうね」など、やさしく丁寧。絵文字をたまに交えて親しみやすく。適度に改行を入れる。
-【関係性】ユーザーとは近所に住んでいる親しい保育士として接する。対等だが、ほんの少しだけ年上の頼れる存在として振-舞う。
-【目的】ユーザーの育児を継続的に支え、孤独や不安を減らし、前向きな気持ちを引き出す。
-【態度】否定せず、まず共感する姿勢。「わかります」「大変ですよね」など安心できるワードを活用。
-【禁止事項】上から目線、強い命令口調、専門用語ばかり使うことは禁止。ユーザーの名前を尋ねたり、「〇〇さん」のように呼んだり、「まな先生です」のように自己紹介を繰り返すことはしない。マークダウン形式（**太字**や*リスト*など）は使用せず、プレーンテキストで回答すること。
-`;
-
-const staticSuggestionCards = [
-    { type: '献立', icon: 'restaurant-outline', text: '卵とにんじんで親子丼はどう？栄養バランスも良くて、赤ちゃんも食べやすいですよ。' },
-    { type: 'ママケア', icon: 'heart-outline', text: '寝不足気味ではないですか？5分だけでも目を閉じて、肩の力を抜くストレッチをしてみてくださいね。' },
-];
-
-const defaultEventSites = [
-    "https://iko-yo.net/",
-    "https://peatix.com/",
-    "https://jmty.jp/",
-    "https://www.walkerplus.com/",
-];
+// ▼▼▼【修正】API呼び出しを一時的に停止するため、この関数は使用しません ▼▼▼
+/*
+const manaPersona = `...`; // ペルソナ設定は現在使用しません
 
 // LLM (Gemini) APIを呼び出す非同期関数
 const callLLM = async (chatHistory) => {
-    const apiKey = "AIzaSyDr-pOhBgVIcEaWWlwYu1jSQoO2uPlU-qk"; 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-    
-    if (apiKey === "YOUR_GEMINI_API_KEY") {
-        const errorMessage = "APIキーが設定されていません。callLLM関数のapiKeyをあなたのキーに置き換えてください。";
-        console.error(errorMessage);
-        Alert.alert("設定エラー", errorMessage);
-        throw new Error(errorMessage);
-    }
-
-    const payload = { contents: chatHistory };
-
-    try {
-        const res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-             const errorBody = await res.json();
-             console.error("API Error Response:", errorBody);
-             throw new Error(`APIリクエストに失敗: ${res.status}`);
-        }
-        const result = await res.json();
-        
-        if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
-            return result.candidates[0].content.parts[0].text;
-        } else {
-            console.warn("Geminiからの応答が予期しない形式です:", result);
-            return "ごめんなさい、うまくお返事できませんでした。";
-        }
-    } catch (error) {
-        console.error("Gemini API呼び出しエラー:", error);
-        throw error;
-    }
+    // ... API呼び出しのロジック全体をコメントアウト ...
 };
+*/
 
-// LLMからのテキスト応答を解析してイベントデータに変換する関数
+const staticSuggestionCards = [
+    { type: '献立のヒント', icon: 'restaurant-outline', text: '卵とにんじんで親子丼はどう？栄養バランスも良くて、赤ちゃんも食べやすいですよ。' },
+    { type: 'ママケア', icon: 'heart-outline', text: '寝不足気味ではないですか？5分だけでも目を閉じて、肩の力を抜くストレッチをしてみてくださいね。' },
+];
+
 const parseEventText = (text) => {
+    // この関数は現在直接は使われませんが、将来の復活のために残しておきます
     if (!text) return null;
     const lines = text.split('\n');
     const eventData = {};
@@ -125,7 +75,6 @@ const parseEventText = (text) => {
     return eventData.eventName ? eventData : null;
 };
 
-// ラジオボタンのコンポーネント
 const RadioButtonGroup = ({ label, options, selectedValue, onValueChange }) => (
     <View>
         <Text style={styles.inputLabel}>{label}</Text>
@@ -177,30 +126,12 @@ export default function ChatScreen({ navigation }) {
     const [isProcessingVoice, setIsProcessingVoice] = useState(false);
     const ws = useRef(null);
 
-    // 地域イベントサイトを検索・保存する関数
+    // ▼▼▼【修正】API呼び出しを停止 ▼▼▼
     const updateLocalEventSites = async (currentLocation) => {
-        if (!currentLocation) return;
-        Alert.alert("情報収集中", `${currentLocation} のイベントサイトを検索します...`);
-        try {
-            const prompt = `「${currentLocation}」で、信頼できる子育て関連のイベント情報サイトや、市区町村の公式ウェブサイトを5つ見つけてください。URLだけを改行区切りでリストアップしてください。`;
-            const response = await callLLM([{ role: "user", parts: [{ text: prompt }] }]);
-            const urls = response.split('\n').filter(url => url.startsWith('http'));
-            
-            if (urls.length > 0) {
-                console.log("見つかったサイト:", urls);
-                await AsyncStorage.setItem(`local_event_sites_${currentLocation}`, JSON.stringify(urls));
-                setLocalEventSites(urls);
-                Alert.alert("情報収集完了", "参考サイトのリストを更新しました。");
-            } else {
-                Alert.alert("情報が見つかりません", "参考サイトを見つけられませんでした。");
-            }
-        } catch (error) {
-            console.error("地域イベントサイトの検索に失敗:", error);
-            Alert.alert("エラー", "サイトの検索中にエラーが発生しました。");
-        }
+        console.log("地域イベントサイトの検索は一時的に停止しています。");
+        return; // 何もせずに処理を終了
     };
 
-    // 設定を保存し、提案を再生成する
     const handleSaveSettings = async () => {
         try {
             const settings = [
@@ -219,166 +150,49 @@ export default function ChatScreen({ navigation }) {
         } catch (e) { Alert.alert("エラー", "設定の保存に失敗しました。"); }
     };
 
-    // 起動時の挨拶を生成
+    // ▼▼▼【修正】固定の挨拶を返すように変更 ▼▼▼
     const generateGreeting = useCallback(async () => {
-        try {
-            const history = [{ role: "user", parts: [{ text: `${manaPersona}\n\nユーザーがアプリを開きました。今の時間帯に合わせた短い挨拶（20文字以内）をしてください。` }] }];
-            const message = await callLLM(history);
-            const initialGreeting = message || 'こんにちは！';
-            setGreeting(initialGreeting);
-            setChatHistory([{ role: "model", parts: [{ text: initialGreeting }] }]);
-        } catch (error) {
-            setGreeting('こんにちは！');
-            console.error("挨拶の生成に失敗:", error);
-        }
+        const initialGreeting = 'こんにちは！今日の調子はどうですか？';
+        setGreeting(initialGreeting);
+        // チャット履歴の初期化
+        setChatHistory([{ role: "model", parts: [{ text: "こんにちは！まな先生です。何かお困りのことはありますか？" }] }]);
     }, []);
     
+    // ▼▼▼【修正】固定の提案を返すように変更 ▼▼▼
     const generateRecordSuggestion = useCallback(async (records) => {
-        if (records.length < 5) return null;
-        try {
-            const now = new Date();
-            const oneDayAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-            const oneWeekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-            const recentRecords = records.filter(r => new Date(r.time) > oneDayAgo).map(r => `${r.time} ${r.type} ${r.data.note || ''}`).join('\n');
-            const weeklyRecords = records.filter(r => new Date(r.time) <= oneDayAgo && new Date(r.time) > oneWeekAgo).map(r => `${r.time} ${r.type} ${r.data.note || ''}`).join('\n');
-            if (!recentRecords) return null;
-            const prompt = `直近24時間の育児記録と、その前の1週間の記録を比較し、何か気づいた変化や傾向について、やさしくポジティブな一言でコメントしてください。\n\n# 直近24時間の記録:\n${recentRecords}\n\n# 1週間の記録:\n${weeklyRecords}`;
-            const message = await callLLM([{ role: "user", parts: [{ text: `${manaPersona}\n\n${prompt}` }] }]);
-            return message ? { type: '記録の変化', icon: 'analytics-outline', text: message } : null;
-        } catch (error) {
-            console.error("記録の提案生成エラー:", error);
-            return null;
-        }
+        return { type: '記録のヒント', icon: 'analytics-outline', text: '毎日の記録、お疲れ様です！規則的な生活リズムができてきていますね。' };
     }, []);
     
-    // ★★★ 変更点: 日付指定を追加 ★★★
+    // ▼▼▼【修正】固定の提案を返すように変更 ▼▼▼
     const generateNearbyEventSuggestion = useCallback(async (records, currentLocation, currentInterests, currentLocalSites) => {
         if (!currentLocation) return null;
-        try {
-            const userMood = records.slice(-10).some(r => r.data.note && (r.data.note.includes('大変') || r.data.note.includes('疲れた'))) ? '少し疲れ気味' : '通常';
-            const combinedSites = [...new Set([...defaultEventSites, ...currentLocalSites])];
-            const siteReference = combinedSites.length > 0
-                ? `以下の参考サイトの情報を最優先で使って、`
-                : `インターネットで検索して、`;
-
-            const today = new Date();
-            const threeDaysLater = new Date();
-            threeDaysLater.setDate(today.getDate() + 3);
-            const formatDate = (date) => date.toISOString().split('T')[0];
-
-            const prompt = `
-# 指示
-${siteReference}ユーザーに合った近所のイベントを1つ提案してください。
-# ユーザー情報
-- 居住地: ${currentLocation}
-- 興味: ${currentInterests}
-- 様子: ${userMood}
-# 参考サイト
-${combinedSites.join('\n')}
-# 条件
-- **開催日が${formatDate(today)}から${formatDate(threeDaysLater)}までのイベントを厳守**
-- 平日に母親が一人で赤ちゃんを連れて気軽に行けるもの
-- 移動手段: 徒歩、自転車、または電車で1〜2駅以内
-- 移動時間: 15分以内
-- 所要時間: 1〜2時間程度
-# 出力フォーマット
-イベント名：[イベント名]
-日程：[開催日や期間]
-場所：[場所]
-所要時間：[移動時間と所要時間の目安]
-参考URL：[可能であればURL]
----
-[まな先生からの、なぜそれをおすすめするのかというコメント(200文字程度)]
-`;
-            const message = await callLLM([{ role: "user", parts: [{ text: `${manaPersona}\n\n${prompt}` }] }]);
-            const eventData = parseEventText(message);
-            return eventData ? { type: '近所のイベント', icon: 'walk-outline', data: eventData } : null;
-        } catch (error) {
-            console.error("近所のイベント提案生成エラー:", error);
-            return null;
-        }
+        return { 
+            type: '近所のイベント', 
+            icon: 'walk-outline', 
+            data: { 
+                eventName: '近くの公園でリフレッシュ',
+                details: '天気の良い日に、少しだけ外の空気を吸うのも良い気分転換になりますよ。無理のない範囲で散歩してみてはいかがでしょうか。'
+            } 
+        };
     }, []);
 
-    // ★★★ 変更点: 日付指定を追加 ★★★
+    // ▼▼▼【修正】固定の提案を返すように変更 ▼▼▼
     const generateWeekendEventSuggestion = useCallback(async (currentLocation, currentInterests, currentLocalSites) => {
         if (!currentLocation) return null;
         const today = new Date();
         if (today.getDay() < 4) return null; // 木曜日以降に表示
-
-        try {
-            const combinedSites = [...new Set([...defaultEventSites, ...currentLocalSites])];
-            const siteReference = combinedSites.length > 0
-                ? `以下の参考サイトの情報を最優先で使って、`
-                : `インターネットで検索して、`;
-
-            const sevenDaysLater = new Date();
-            sevenDaysLater.setDate(today.getDate() + 7);
-            const formatDate = (date) => date.toISOString().split('T')[0];
-
-            const prompt = `
-# 指示
-${siteReference}ユーザーに合った今週末の特別なイベントやアクティビティを1つ提案してください。
-# ユーザー情報
-- 居住地: ${currentLocation}
-- 興味: ${currentInterests}
-# 参考サイト
-${defaultEventSites.join('\n')}
-# 条件
-- **開催日が${formatDate(today)}から${formatDate(sevenDaysLater)}までのイベントを厳守**
-- 家族で楽しめるもの
-- 移動時間: 60分程度以内
-- 半日以上時間が使えるような特別なもの
-# 出力フォーマット
-イベント名：[イベント名]
-日程：[開催日や期間]
-場所：[場所]
-所要時間：[移動時間と所要時間の目安]
-参考URL：[可能であればURL]
----
-[まな先生からの、なぜそれをおすすめするのかというコメント(200文字程度)]
-`;
-            const message = await callLLM([{ role: "user", parts: [{ text: `${manaPersona}\n\n${prompt}` }] }]);
-            const eventData = parseEventText(message);
-            return eventData ? { type: '週末のイベント', icon: 'car-sport-outline', data: eventData } : null;
-        } catch (error) {
-            console.error("週末のイベント提案生成エラー:", error);
-            return null;
-        }
+        return { 
+            type: '週末のイベント', 
+            icon: 'car-sport-outline', 
+            data: {
+                eventName: '週末はゆっくりお家で',
+                details: '今週末は無理せず、お家でゆっくり過ごすのはいかがでしょう。好きな音楽を聴いたり、のんびり過ごすのも立派なリフレッシュです。'
+            }
+        };
     }, []);
 
     const handleRefreshSuggestion = async (indexToRefresh, type) => {
-        if (refreshingCardIndex !== null) return;
-        setRefreshingCardIndex(indexToRefresh);
-        let newSuggestion = null;
-        try {
-            const rawData = await AsyncStorage.getItem('records');
-            const records = rawData ? JSON.parse(rawData) : [];
-            switch (type) {
-                case '記録の変化':
-                    newSuggestion = await generateRecordSuggestion(records);
-                    break;
-                case '近所のイベント':
-                    newSuggestion = await generateNearbyEventSuggestion(records, location, interests, localEventSites);
-                    break;
-                case '週末のイベント':
-                    newSuggestion = await generateWeekendEventSuggestion(location, interests, localEventSites);
-                    break;
-            }
-            if (newSuggestion) {
-                setSuggestions(currentSuggestions => {
-                    const newSuggestions = [...currentSuggestions];
-                    newSuggestions[indexToRefresh] = newSuggestion;
-                    return newSuggestions;
-                });
-            } else {
-                Alert.alert("ごめんなさい", "新しい提案を見つけられませんでした。");
-            }
-        } catch (error) {
-            console.error(`Error refreshing suggestion for type ${type}:`, error);
-            Alert.alert("エラー", "提案の更新中にエラーが発生しました。");
-        } finally {
-            setRefreshingCardIndex(null);
-        }
+        Alert.alert("リフレッシュ機能", "現在、提案の更新は一時的に停止しています。");
     };
 
     useEffect(() => {
@@ -407,8 +221,6 @@ ${defaultEventSites.join('\n')}
                     const storedSites = await AsyncStorage.getItem(`local_event_sites_${loadedLocation}`);
                     if (storedSites) {
                         setLocalEventSites(JSON.parse(storedSites));
-                    } else {
-                        await updateLocalEventSites(loadedLocation);
                     }
                 } else {
                     setIsSettingsModalVisible(true);
@@ -424,7 +236,7 @@ ${defaultEventSites.join('\n')}
     }, [generateGreeting]);
 
     useEffect(() => {
-        if (isLoading || !location) {
+        if (isLoading) {
             setSuggestions([]);
             return;
         }
@@ -457,22 +269,21 @@ ${defaultEventSites.join('\n')}
         setExpandedCardIndex(expandedCardIndex === index ? null : index);
     };
 
+    // ▼▼▼【修正】チャット機能も固定の返答をするように変更 ▼▼▼
     const handleSendMessage = async () => {
         if (!userInput.trim() || isProcessingVoice) return;
         const newUserMessage = { role: "user", parts: [{ text: userInput }] };
-        const newHistory = [...chatHistory, newUserMessage];
-        setChatHistory(newHistory);
+        setChatHistory(prev => [...prev, newUserMessage]);
         setUserInput('');
-        try {
-            const botResponse = await callLLM(newHistory);
-            if (botResponse) {
-                const newBotMessage = { role: "model", parts: [{ text: botResponse }] };
-                setChatHistory(prev => [...prev, newBotMessage]);
-            }
-        } catch (e) {
-            const errorMessage = { role: "model", parts: [{ text: "ごめんなさい、うまく応答できませんでした。" }] };
-            setChatHistory(prev => [...prev, errorMessage]);
-        }
+        
+        // AI呼び出しの代わりに固定メッセージを返す
+        const botResponse = "ごめんなさい、今はまな先生とお話しできません。もうすぐお話しできるようになりますので、待っていてくださいね。";
+        const newBotMessage = { role: "model", parts: [{ text: botResponse }] };
+        
+        // 少し待ってから返信が来たように見せる
+        setTimeout(() => {
+            setChatHistory(prev => [...prev, newBotMessage]);
+        }, 500);
     };
 
     const startChatRecording = async () => {
@@ -696,7 +507,6 @@ ${defaultEventSites.join('\n')}
     );
 }
 
-// スタイル定義
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#FFF8F0' },
     scrollContainer: { paddingBottom: 90 },
