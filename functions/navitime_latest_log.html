@@ -1,0 +1,130 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NAVITIME API 経路レポート</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f4f7f6; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-4xl mx-auto bg-white p-6 rounded-xl shadow-lg">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">NAVITIME API 経路レポート</h1>
+        <p class="text-gray-500 mb-8">生成日時: 2025/7/31 0:35:19</p>
+        
+        <div class="summary-card">
+            <h2 class="text-xl font-bold mb-4">経路サマリー</h2>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div class="p-4 bg-gray-100 rounded-lg col-span-2 md:col-span-3">
+                    <p class="text-sm text-gray-600 font-semibold">出発 → 到着</p>
+                    <p class="text-2xl font-bold text-gray-800">10:00 → 11:00</p>
+                </div>
+                <div class="p-4 bg-blue-50 rounded-lg text-center">
+                    <p class="text-sm text-blue-800 font-semibold">合計所要時間</p>
+                    <p class="text-2xl font-bold text-blue-900">60分</p>
+                </div>
+                <div class="p-4 bg-green-50 rounded-lg text-center">
+                    <p class="text-sm text-green-800 font-semibold">合計距離</p>
+                    <p class="text-2xl font-bold text-green-900">16.7 km</p>
+                </div>
+                <div class="p-4 bg-indigo-50 rounded-lg text-center">
+                    <p class="text-sm text-indigo-800 font-semibold">総歩行距離</p>
+                    <p class="text-2xl font-bold text-indigo-900">1341 m</p>
+                </div>
+                <div class="p-4 bg-yellow-50 rounded-lg text-center">
+                    <p class="text-sm text-yellow-800 font-semibold">運賃 (IC)</p>
+                    <p class="text-2xl font-bold text-yellow-900">388 円</p>
+                </div>
+                 <div class="p-4 bg-red-50 rounded-lg text-center">
+                    <p class="text-sm text-red-800 font-semibold">運賃 (切符)</p>
+                    <p class="text-2xl font-bold text-red-900">390 円</p>
+                </div>
+                <div class="p-4 bg-purple-50 rounded-lg text-center">
+                    <p class="text-sm text-purple-800 font-semibold">乗り換え回数</p>
+                    <p class="text-2xl font-bold text-purple-900">1 回</p>
+                </div>
+            </div>
+        </div>
+        <div class="steps-card mt-8">
+            <h2 class="text-xl font-bold mb-4">経路詳細</h2>
+            <div class="space-y-4">
+            <div class="flex items-start p-4 border rounded-lg bg-white shadow-sm">
+                <div class="flex flex-col items-center mr-4">
+                    <div class="text-2xl">🚶</div>
+                    <div class="text-xs font-semibold text-gray-600">徒歩</div>
+                </div>
+                <div class="flex-grow">
+                    <p class="font-bold text-lg">出発地 → 新宿(東口)</p>
+                </div>
+                <div class="text-right ml-4 flex-shrink-0">
+                    <p class="font-bold text-gray-800">10:00 → 10:09</p>
+                    <p class="text-sm text-gray-500">9分</p>
+                    <p class="text-sm text-gray-500">667 m</p>
+                </div>
+            </div>
+            <div class="flex items-start p-4 border rounded-lg bg-white shadow-sm">
+                <div class="flex flex-col items-center mr-4">
+                    <div class="text-2xl">🚆</div>
+                    <div class="text-xs font-semibold text-gray-600">普通</div>
+                </div>
+                <div class="flex-grow">
+                    
+                <div class="flex items-center">
+                    <div class="w-1.5 h-full rounded-full mr-4" style="background-color: #80C241; min-height: 50px;"></div>
+                    <div>
+                        <p class="font-bold text-lg">新宿(東口) <span class="text-sm text-gray-500"><span class="font-bold" style="color:#80C241">JY 17</span></span></p>
+                        <p class="text-sm text-gray-600 my-1 ml-2">↓ ＪＲ山手線 (ＪＲ東日本)</p>
+                        <p class="font-bold text-lg">品川 <span class="text-sm text-gray-500"><span class="font-bold" style="color:#80C241">JY 25</span></span></p>
+                        <p class="text-xs text-gray-500 mt-1">区間運賃: 210円</p>
+                    </div>
+                </div>
+                </div>
+                <div class="text-right ml-4 flex-shrink-0">
+                    <p class="font-bold text-gray-800">10:11 → 10:30</p>
+                    <p class="text-sm text-gray-500">19分</p>
+                    <p class="text-sm text-gray-500">10600 m</p>
+                </div>
+            </div>
+            <div class="flex items-start p-4 border rounded-lg bg-white shadow-sm">
+                <div class="flex flex-col items-center mr-4">
+                    <div class="text-2xl">🚆</div>
+                    <div class="text-xs font-semibold text-gray-600">普通</div>
+                </div>
+                <div class="flex-grow">
+                    
+                <div class="flex items-center">
+                    <div class="w-1.5 h-full rounded-full mr-4" style="background-color: #E5171F; min-height: 50px;"></div>
+                    <div>
+                        <p class="font-bold text-lg">品川 <span class="text-sm text-gray-500"><span class="font-bold" style="color:#E5171F">KK 01</span></span></p>
+                        <p class="text-sm text-gray-600 my-1 ml-2">↓ 京急本線 (京浜急行電鉄)</p>
+                        <p class="font-bold text-lg">大森海岸 <span class="text-sm text-gray-500"><span class="font-bold" style="color:#E5171F">KK 07</span></span></p>
+                        <p class="text-xs text-gray-500 mt-1">区間運賃: 180円</p>
+                    </div>
+                </div>
+                </div>
+                <div class="text-right ml-4 flex-shrink-0">
+                    <p class="font-bold text-gray-800">10:38 → 10:49</p>
+                    <p class="text-sm text-gray-500">11分</p>
+                    <p class="text-sm text-gray-500">4800 m</p>
+                </div>
+            </div>
+            <div class="flex items-start p-4 border rounded-lg bg-white shadow-sm">
+                <div class="flex flex-col items-center mr-4">
+                    <div class="text-2xl">🚶</div>
+                    <div class="text-xs font-semibold text-gray-600">徒歩</div>
+                </div>
+                <div class="flex-grow">
+                    <p class="font-bold text-lg">大森海岸 → 目的地</p>
+                </div>
+                <div class="text-right ml-4 flex-shrink-0">
+                    <p class="font-bold text-gray-800">10:49 → 11:00</p>
+                    <p class="text-sm text-gray-500">11分</p>
+                    <p class="text-sm text-gray-500">674 m</p>
+                </div>
+            </div></div></div>
+    </div>
+</body>
+</html>
