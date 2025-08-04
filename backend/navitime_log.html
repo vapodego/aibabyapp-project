@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NAVITIME API ログビューア</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .json-viewer ul { list-style-type: none; padding-left: 20px; }
+        .json-viewer .key { color: #92278f; cursor: pointer; }
+        .json-viewer .string { color: #3ab54a; }
+        .json-viewer .number { color: #29abe2; }
+        .json-viewer .boolean { color: #f7931e; }
+        .json-viewer .null { color: #f15a24; }
+        .json-viewer .collapsible { display: none; }
+        .json-viewer .collapser::before { content: '▶ '; }
+        .json-viewer .expanded > .collapser::before { content: '▼ '; }
+        .json-viewer .expanded > .collapsible { display: block; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">NAVITIME API ログビューア</h1>
+            <p class="text-gray-600 mt-2">Firestoreに保存された最新のNAVITIME APIの応答データを表示します。</p>
+        </header>
+
+        <main class="bg-white p-6 rounded-lg shadow-md">
+            <div class="mb-6">
+                <p class="mb-2 font-semibold">Firebaseプロジェクトの設定:</p>
+                <textarea id="firebaseConfig" class="w-full h-40 p-2 border rounded-md bg-gray-50 text-sm" placeholder="ここにFirebaseプロジェクトのWebアプリ設定を貼り付けてください..."></textarea>
+            </div>
+            <button id="fetchLog" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors duration-300 shadow-lg">
+                最新のNAVITIMEログを取得
+            </button>
+
+            <div id="log-container" class="mt-8 p-4 bg-gray-50 rounded-md border border-gray-200 overflow-x-auto">
+                <p class="text-gray-500">まだデータがありません。</p>
+            </div>
+             <div id="loading" class="hidden text-center mt-4">
+                <p>読み込み中...</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-app.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore.js";
+
+        const fetchLogButton = document.getElementById('fetchLog');
+        const logContainer = document.getElementById('log-container');
+        const loadingDiv = document.getElementById('loading');
+        const firebaseConfigText = document.getElementById('firebaseConfig');
+
+        let db;
+
+        // JSONを整形して表示する関数
+        function renderJson(obj, container) {
+            container.innerHTML = '';
+            const rootUl = document.createElement('ul');
+            rootUl.className = 'json-viewer';
+            buildTree(obj, rootUl);
+            container.appendChild(rootUl);
+        }
+
+        function buildTree(obj, parentElement) {
+            for (const key in obj) {
+                if (obj.hasOwnProperty(key)) {
+                    const li = document.createElement('li');
+                    const keySpan = document.createElement('span');
+                    keySpan.className = 'key';
+                    
+                    const value = obj[key];
+
+                    if (typeof value === 'object' && value !== null) {
+                        keySpan.textContent = `"${key}": `;
+                        keySpan.classList.add('collapser');
+                        li.appendChild(keySpan);
+                        
+                        const ul = document.createElement('ul');
+                        ul.className = 'collapsible';
+                        buildTree(value, ul);
+                        li.appendChild(ul);
+
+                        keySpan.onclick = (e) => {
+                            e.stopPropagation();
+                            li.classList.toggle('expanded');
+                        };
+                    } else {
+                        keySpan.textContent = `"${key}": `;
+                        li.appendChild(keySpan);
+                        
+                        const valueSpan = document.createElement('span');
+                        const type = typeof value;
+                        valueSpan.className = type;
+                        valueSpan.textContent = JSON.stringify(value);
+                        li.appendChild(valueSpan);
+                    }
+                    parentElement.appendChild(li);
+                }
+            }
+        }
+
+        fetchLogButton.addEventListener('click', async () => {
+            const configString = firebaseConfigText.value.trim();
+            if (!configString) {
+                alert('Firebaseプロジェクトの設定を貼り付けてください。');
+                return;
+            }
+
+            try {
+                const firebaseConfig = JSON.parse(configString);
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+            } catch (e) {
+                alert('Firebaseの設定情報が正しくないようです。JSON形式で貼り付けてください。');
+                console.error(e);
+                return;
+            }
+
+            logContainer.innerHTML = '';
+            loadingDiv.classList.remove('hidden');
+
+            try {
+                const docRef = doc(db, "debug_logs", "navitime_latest");
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    const logData = docSnap.data();
+                    renderJson(logData.response, logContainer);
+                } else {
+                    logContainer.innerHTML = '<p class="text-red-500">ログドキュメントが見つかりませんでした。(debug_logs/navitime_latest)</p>';
+                }
+            } catch (error) {
+                console.error("Error getting document:", error);
+                logContainer.innerHTML = `<p class="text-red-500">エラーが発生しました: ${error.message}</p>`;
+            } finally {
+                loadingDiv.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
