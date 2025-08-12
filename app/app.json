@@ -7,6 +7,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+        "androidStatusBar": {
+      "hidden": false,
+      "translucent": false,
+      "barStyle": "light-content",
+      "backgroundColor": "#000000"
+    },
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -20,7 +26,12 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.yosukeaaa.moonshotchat"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -30,6 +41,11 @@
     ],
     "plugins": [
       "expo-audio"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "99150cb0-99ce-4a80-a869-74561259c511"
+      }
+    }
   }
 }

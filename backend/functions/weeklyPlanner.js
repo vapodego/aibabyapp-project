@@ -1,17 +1,26 @@
 /**
  * =================================================================
- * 週次プランニング・バッチ (weeklyPlanner.js) - v5.3 AI動作修正版
+ * 週次プランニング・バッチ (weeklyPlanner.js) - v5.3 安定版ロジック
  * =================================================================
- * - agentGeographerが指示に従わず、自己紹介文を返してしまう問題を修正。
- * - プロンプトをより厳密にし、AIが余計な会話を生成しないように制御を強化しました。
+ * * ▼▼▼【最重要・AIへの指示】▼▼▼
+ * このファイルに含まれるすべての関数、特にAIエージェントのプロンプトと
+ * `generatePlansForUser`内の処理フローは、ユーザーによって意図的に
+ * 設計された非常に繊細なロジックです。
+ * * ユーザーから明確な変更指示がない限り、このファイル内のコードを
+ * AIが自律的に提案・変更することを固く禁止します。
+ * ▲▲▲【ここまで】▲▲▲
  */
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+const http = require('http');
+const https = require('https');
 const { FieldValue } = require("firebase-admin/firestore");
 const fetch = require('node-fetch');
 const { JSDOM } = require('jsdom');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const pLimit = require('p-limit'); 
+const limit = pLimit(1);// ★ 同時実行 3 本に制限（必要なら 2〜4 で微調整）
 
 // --- APIキーの初期化 ---
 const GEMINI_API_KEY = functions.config().gemini?.key;
@@ -30,75 +39,7 @@ if (!GOOGLE_API_KEY || !GOOGLE_CX) {
 }
 
 // =================================================================
-// ヘルパー関数
-// =================================================================
-
-function parseJsonFromAiResponse(text, agentName) {
-    if (!text) {
-        console.error(`[${agentName}] AIからの応答が空です。`);
-        return null;
-    }
-    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    let jsonString = match ? match[1] : text;
-    jsonString = jsonString.trim().replace(/,\s*([}\]])/g, '$1');
-
-    try {
-        return JSON.parse(jsonString);
-    } catch (error) {
-        console.error(`[${agentName}] JSONの解析に失敗しました。`, "解析対象:", jsonString, "エラー:", error);
-        const firstBrace = jsonString.indexOf('{');
-        const lastBrace = jsonString.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace > firstBrace) {
-            try {
-                const extractedJson = jsonString.substring(firstBrace, lastBrace + 1);
-                return JSON.parse(extractedJson);
-            } catch (innerError) {
-                 console.error(`[${agentName}] JSONの再解析にも失敗しました。`, "エラー:", innerError);
-                 return null;
-            }
-        }
-        return null;
-    }
-}
-
-async function callGenerativeAi(agentName, prompt, isJsonOutput = true) {
-    if (!genAI) {
-        console.error(`[${agentName}] Gemini AIが初期化されていません。`);
-        return null;
-    }
-    
-    const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash-latest",
-        generationConfig: {
-            temperature: 0.3,
-            responseMimeType: isJsonOutput ? "application/json" : "text/plain",
-        }
-    });
-
-    let attempt = 0;
-    const maxRetries = 3;
-    while (attempt < maxRetries) {
-        try {
-            const result = await model.generateContent(prompt);
-            const responseText = result.response.text();
-            if (!responseText) return null;
-
-            return isJsonOutput ? parseJsonFromAiResponse(responseText, agentName) : responseText.trim();
-
-        } catch (error) {
-            attempt++;
-            console.warn(`> [${agentName}]エージェントのエラー (試行 ${attempt}/${maxRetries}):`, error.message);
-            if (attempt >= maxRetries) {
-                console.error(`> [${agentName}]エージェントが最大リトライ回数に達しました。`);
-                return null;
-            }
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 2000));
-        }
-    }
-}
-
-// =================================================================
-// メインコントローラー
+// URLから手動実行する関数 (テスト用)
 // =================================================================
 exports.runWeeklyPlansManually = functions
   .region("asia-northeast1")
@@ -126,6 +67,12 @@ exports.runWeeklyPlansManually = functions
       console.log(`ユーザーID: ${userId} (${userData.homeAddress}) のプランを生成中...`);
       const { finalPlans, categorizedAlternatives } = await generatePlansForUser(userId, userData);
       
+
+console.log("---BEGIN MOCK DATA---");
+  // ログに整形されたJSONとして出力
+  console.log(JSON.stringify(finalPlans, null, 2)); 
+  console.log("---END MOCK DATA---");
+
       if (finalPlans && finalPlans.length > 0) {
         await savePlansToFirestore(finalPlans, userId);
         console.log(`> ${finalPlans.length}件のプランをユーザーID: ${userId} のために保存しました。`);
@@ -142,216 +89,379 @@ exports.runWeeklyPlansManually = functions
     }
   });
 
+
+// =================================================================
+// アプリから呼び出す関数 (本番用・非同期)
+// =================================================================
+exports.generatePlansOnCall = functions
+  .region("asia-northeast1")
+  .runWith({ timeoutSeconds: 540, memory: "2GB" })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'この機能を利用するには認証が必要です。');
+    }
+    const userId = context.auth.uid;
+    console.log(`【Callable】ユーザーID: ${userId} のプラン生成を開始します。`);
+
+    const userRef = admin.firestore().collection('users').doc(userId);
+    try {
+      await userRef.set({ planGenerationStatus: 'in_progress' }, { merge: true });
+      console.log(`> ユーザーID: ${userId} のステータスを 'in_progress' に更新しました。`);
+    } catch (e) {
+      console.error("ステータスの更新に失敗:", e);
+      // ここでのエラーは致命的ではないので、処理は続行する
+    }
+
+    const { location, interests } = data;
+    if (!location || !interests) {
+      throw new functions.https.HttpsError('invalid-argument', '地域と興味・関心の両方が必要です。');
+    }
+    
+    const userData = {
+        homeAddress: location,
+        interests: interests,
+    };
+    
+   // 非同期処理をバックグラウンドで実行
+    (async () => {
+      try {
+        // メインのプラン生成処理を実行
+        const { finalPlans, categorizedAlternatives } = await generatePlansForUser(userId, userData);
+
+        // プランが見つかったかどうかに関わらず、プランを保存（または空にする）
+        // savePlansToFirestore内でステータスが 'completed' に更新される
+        await savePlansToFirestore(finalPlans || [], userId);
+        console.log(`ユーザーID: ${userId} のプラン生成と保存が正常に完了しました。`);
+
+      } catch (error) {
+        console.error(`[バックグラウンドエラー] ユーザーID: ${userId} の処理中に致命的なエラーが発生しました。`, error);
+        // エラーが発生した場合も、ステータスを更新してUIの待機状態を解除する
+        await userRef.set({ planGenerationStatus: 'completed' }, { merge: true });
+
+      }
+    })(); // 即時実行
+
+    // ユーザーにはすぐに「開始しました」と応答を返す
+    return { status: 'processing_started', message: 'プラン生成処理を開始しました。完了後、結果が自動で表示されます。' };
+    });
+// ...
+
+// =================================================================
+// ローカルテスト用：同期的にプランを生成して結果を返す関数
+// =================================================================
+exports.generatePlansOnCall_local_test = functions
+  .region("asia-northeast1")
+  .runWith({ timeoutSeconds: 540, memory: "2GB" })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'この機能を利用するには認証が必要です。');
+    }
+    const userId = context.auth.uid;
+    console.log(`【ローカルテスト用】ユーザーID: ${userId} のプラン生成を同期的に開始します。`);
+
+    const { location, interests } = data;
+    if (!location || !interests) {
+      throw new functions.https.HttpsError('invalid-argument', '地域と興味・関心の両方が必要です。');
+    }
+    
+    const userData = {
+        homeAddress: location,
+        interests: interests,
+    };
+
+    try {
+      const { finalPlans, categorizedAlternatives } = await generatePlansForUser(userId, userData);
+      
+      if (finalPlans && finalPlans.length > 0) {
+        await savePlansToFirestore(finalPlans, userId);
+        console.log(`[ローカルテスト用] ${finalPlans.length}件のプランを保存しました。`);
+        return { status: 'success', plans: finalPlans, alternatives: categorizedAlternatives };
+      } else {
+        console.log(`[ローカルテスト用] 有効なプランが見つかりませんでした。`);
+        return { status: 'no_plans_found', plans: [], alternatives: null };
+      }
+    } catch (error) {
+        console.error(`[ローカルテスト用] ユーザーID: ${userId} の処理中にエラーが発生しました。`, error);
+        throw new functions.https.HttpsError('internal', 'プラン生成中にエラーが発生しました。', error.message);
+    }
+  });
+
+
+// =================================================================
+// 共通ロジック (AIエージェントの処理フロー) - v5.4 改良版
+// =================================================================
 async function generatePlansForUser(userId, userData) {
     const searchArea = await agentGeographer(userData.homeAddress);
     console.log(`--- 行動範囲を「${searchArea}」に設定しました ---`);
 
-    console.log("--- フェーズ1: 有望スポットの発見 ---");
-    const promisingVenuesResult = await agentVenueScout(userData, searchArea);
-    if (!promisingVenuesResult || !promisingVenuesResult.venues || promisingVenuesResult.venues.length === 0) {
+    // --- ▼▼【ここからが新しいプロセスです】▼▼ ---
+
+    // --- 新フェーズ1: 広域イベント検索 ---
+    console.log("--- 新フェーズ1: 広域イベント検索 ---");
+const searchQueriesResult = await agentBroadEventSearcher(userData, searchArea);
+    if (!searchQueriesResult || !searchQueriesResult.queries) {
         return { finalPlans: [], categorizedAlternatives: null };
     }
-    const promisingVenues = promisingVenuesResult.venues;
-    console.log(`> ${promisingVenues.length}件の有望な施設・サイトを発見しました。`);
-    console.log("  > 選定理由:");
-    promisingVenues.forEach(venue => console.log(`    - ${venue.name}: ${venue.reason}`));
-
-    console.log("--- フェーズ2: 個別深掘り調査 ---");
-    let allSearchResults = [];
-    for (const venue of promisingVenues) {
-        console.log(`  > 深掘り中: ${venue.name}`);
-        const siteSpecificQuery = await agentSiteSpecificSearcher(venue, searchArea);
-        if (siteSpecificQuery && siteSpecificQuery.query) {
-            const searchResults = await toolGoogleSearch(siteSpecificQuery.query);
-            allSearchResults.push(...searchResults);
-        }
-    }
+    
+    // 生成された複数のクエリで並列検索
+    const searchPromises = searchQueriesResult.queries.map(q => limit(() => toolGoogleSearch(q)));
+    const searchResultsArray = await Promise.all(searchPromises);
+    const allSearchResults = searchResultsArray.flat();
+    
     if (allSearchResults.length === 0) return { finalPlans: [], categorizedAlternatives: null };
     console.log(`> 合計${allSearchResults.length}件のイベント候補URLを取得しました。`);
 
-    console.log("--- フェーズ3: 鑑定と深掘り ---");
-    let validCandidates = [];
-    let listPageUrls = [];
-    const processedUrls = new Set();
+    // --- 新フェーズ2: 鑑定と深掘り (旧フェーズ3と同じ) ---
+    console.log("--- 新フェーズ2: 鑑定と深掘り ---");
     const uniqueUrls = [...new Set(allSearchResults.map(r => r.url))];
 
-    for (const url of uniqueUrls) {
-        if (processedUrls.has(url)) continue;
-        processedUrls.add(url);
+    const inspectionPromises = uniqueUrls.map((url) =>
+      limit(async () => {
         const htmlContent = await toolGetHtmlContent(url);
-        if (!htmlContent) continue;
+        if (!htmlContent) return null;
         const inspectionResult = await agentInspector(url, htmlContent, userData);
-        if (inspectionResult) {
-            if (inspectionResult.isListPage) {
-                listPageUrls.push(url);
-            } else if (inspectionResult.isValid && inspectionResult.isMatch) {
-                validCandidates.push({ ...inspectionResult, url: url });
-            }
+        console.log(`[鑑定結果] URL: ${url}, 結果: ${JSON.stringify(inspectionResult)}`);
+        return { url, result: inspectionResult };
+      })
+    );
+    const inspectionResults = await Promise.all(inspectionPromises);
+
+    // --- ▲▲【ここまでが新しいプロセスです】▲▲ ---
+    
+    // ... ここから下の鑑定結果の分類、最終選考、プラン生成のロジックは変更ありません ...
+    let validCandidates = [];
+    let listPageUrls = [];
+    for (const item of inspectionResults) {
+        if (!item || !item.result) continue;
+        if (item.result.isListPage) {
+            listPageUrls.push(item.url);
+        } else if (item.result.isValid && item.result.isMatch) {
+            validCandidates.push({ ...item.result, url: item.url });
         }
     }
 
     if (listPageUrls.length > 0) {
-        console.log(`--- フェーズ3.5: リストページの深掘り (${listPageUrls.length}件) ---`);
-        const BATCH_SIZE = 5;
-        for (let i = 0; i < listPageUrls.length; i += BATCH_SIZE) {
-            const batchUrls = listPageUrls.slice(i, i + BATCH_SIZE);
-            const extractedCandidates = await agentListPageAnalyzer(batchUrls);
-            if (extractedCandidates && extractedCandidates.length > 0) {
-                for (const candidate of extractedCandidates) {
-                    const newUrl = candidate.url;
-                    if (!newUrl || processedUrls.has(newUrl)) continue;
-                    processedUrls.add(newUrl);
-                    const htmlContent = await toolGetHtmlContent(newUrl);
-                    if (!htmlContent) continue;
-                    const inspectionResult = await agentInspector(newUrl, htmlContent, userData);
+        console.log(`--- 新フェーズ2.5: リストページの深掘り (${listPageUrls.length}件) ---`);
+        const extractedCandidates = await agentListPageAnalyzer(listPageUrls);
+
+        if (extractedCandidates && extractedCandidates.length > 0) {
+            const deepDivePromises = extractedCandidates.map((candidate) =>
+                limit(async () => {
+                    if (!candidate.url) return null;
+                    const htmlContent = await toolGetHtmlContent(candidate.url);
+                    if (!htmlContent) return null;
+                    const inspectionResult = await agentInspector(candidate.url, htmlContent, userData);
                     if (inspectionResult && inspectionResult.isValid && inspectionResult.isMatch) {
-                         validCandidates.push({ ...inspectionResult, url: newUrl });
+                        return { ...inspectionResult, url: candidate.url };
                     }
-                }
-            }
+                    return null;
+                })
+            );
+            const deepDiveResults = await Promise.all(deepDivePromises);
+            // 深掘りして見つかった有効な候補を、メインの候補リストに追加する
+            validCandidates.push(...deepDiveResults.filter(Boolean));
         }
     }
 
     if (validCandidates.length === 0) return { finalPlans: [], categorizedAlternatives: null };
     console.log(`> 鑑定を通過した候補が${validCandidates.length}件見つかりました。最終選考に移ります...`);
     
+    // ▼▼▼【ここからが復元するコードです】▼▼▼
+
     const selectionResult = await agentFinalSelector(validCandidates, userData);
+
     if (!selectionResult || !selectionResult.final_candidates || selectionResult.final_candidates.length === 0) {
         return { finalPlans: [], categorizedAlternatives: null };
     }
     const finalCandidates = selectionResult.final_candidates;
     console.log(`> ★★★ ${finalCandidates.length}件の有効な候補を確保 ★★★`);
-    console.log("  > 最終選考AIの判断理由:");
-    console.log(`    ${selectionResult.reasoning.replace(/\n/g, '\n    ')}`);
-    console.log("  > 最終候補リスト:");
-    finalCandidates.forEach(candidate => console.log(`    - ${candidate.eventName} (${candidate.url})`));
 
+    let categorizedAlternatives = null;
     const finalCandidateUrls = new Set(finalCandidates.map(c => c.url));
     const alternativeCandidates = validCandidates.filter(c => !finalCandidateUrls.has(c.url));
-    let categorizedAlternatives = null;
     if (alternativeCandidates.length > 0) {
         console.log(`--- フェーズ4.5: 代替案のカテゴリ分け (${alternativeCandidates.length}件) ---`);
         const result = await agentAlternativeCategorizer(alternativeCandidates, userData);
         if (result && result.categorized_alternatives) {
             categorizedAlternatives = result.categorized_alternatives;
-            console.log("> 代替案のカテゴリ分けが完了しました。");
         }
     }
 
-    console.log("--- フェーズ4: 画像抽出と最終プラン生成 ---");
-    for (const candidate of finalCandidates) {
+    console.log("--- フェーズ4: 画像抽出と最終プラン生成 (並列実行) ---");
+
+    await Promise.all(finalCandidates.map(async (candidate) => {
         const htmlContent = await toolGetHtmlContent(candidate.url);
-        if(htmlContent){
+        if (htmlContent) {
             candidate.imageUrl = await findBestImageForEvent(candidate, htmlContent);
         }
-    }
-
+    }));
+    
+    console.log("> 画像抽出完了。最終プランニングを開始します...");
     const finalPlans = await agentFinalPlanner(finalCandidates, userData);
     
     return { finalPlans, categorizedAlternatives };
+
+    // ▲▲▲【ここまで】▲▲▲
 }
 
 // =================================================================
 // AIエージェント群
 // =================================================================
 
-// ▼▼▼【修正】Geographerのプロンプトを強化 ▼▼▼
 async function agentGeographer(location) {
     const prompt = `
 # INSTRUCTION
-You are a geocoding expert. Your task is to expand a given location into a wider search area.
+You are an expert Japanese geographer. Your task is to define a broad, multi-region event search area based on a user's location, and format it for a Google Search query.
 
 # TASK
-Based on the user's location, suggest a wider area for event search within a 60-minute radius.
+1.  **Identify the Core Prefecture**: First, determine the primary prefecture (e.g., "神奈川県", "東京都") from the user's input location.
+2.  **Define a Broad Search Area**: Based on that core prefecture, suggest a search area that includes several major cities, the entire prefecture itself, and/or neighboring major cities/prefectures.
+3.  **Format for Google Search**: The final output MUST be a single plain text string, with each location name separated by " OR ".
 
 # RULES
-- DO NOT include any introductory phrases, greetings, or conversational text.
-- Your response MUST be ONLY the names of the areas as a simple string.
-- DO NOT explain what you are doing.
-- The output format must be a plain text string.
+- The output units MUST be at the city ("市") or prefecture ("県") level.
+- **CRITICAL**: In the final output string, remove administrative suffixes like "市", "区", "県", "都" from each location name (e.g., "横浜市" becomes "横浜", "東京都" becomes "東京").
+- The output MUST contain multiple locations.
+- DO NOT include any conversational text, explanations, or greetings.
 
 # USER LOCATION
 "${location}"
 
-# EXAMPLE OUTPUT
-横浜・川崎・東京
+# EXAMPLE OUTPUT for "東京都渋谷区":
+東京 OR 神奈川 OR 埼玉 OR 千葉
 `;
     return await callGenerativeAi("ジオグラファー", prompt, false) || location;
 }
-// ▲▲▲【ここまで】▲▲▲
 
-async function agentVenueScout(userData, searchArea) {
+// async function agentVenueScout(userData, searchArea) {
+//     const prompt = `
+// # Role: Expert Local Scout
+// # Task: Based on the user's profile and the designated search area, list the top 5 most promising venues and 2 reliable portal sites to search for weekend events.
+// # User Profile:
+// ${JSON.stringify(userData, null, 2)}
+// # Designated Search Area: "${searchArea}"
+// # Guidelines:
+// - Suggest specific, well-known facilities within the search area that match the user's interests.
+// - Also include major portal sites like 'iko-yo.net' or 'walkerplus.com'.
+// - For each suggestion, provide its name and a brief reason for your choice.
+// # Output Instruction: Respond ONLY with a JSON object.
+// {
+//   "venues": [
+//     { "name": "...", "reason": "..." },
+//     { "name": "いこーよネット", "reason": "子供向けイベントの網羅性が高いポータルサイト" }
+//   ]
+// }`;
+//     return await callGenerativeAi("有望スポット発見", prompt);
+// }
+
+// async function agentSiteSpecificSearcher(venue, searchArea, dateRange) {
+//     const prompt = `
+// # Role: Deep-Dive Search Specialist
+// # Task: Create the most effective Google search query to find event information.
+// # Target Venue:
+// ${JSON.stringify(venue, null, 2)}
+// # Search Area (as a Google 'OR' query): "${searchArea}"
+// # Date Range (as a Google date range query): "${dateRange}"
+// # Guidelines:
+// - Construct a query combining the venue, search area, and date range.
+// - **CRITICAL**: The Search Area string is already formatted with " OR ". You MUST enclose it in parentheses \`(...)\` in the final query.
+// - If the venue is a portal site (e.g., 'iko-yo.net'), use the "site:" operator.
+// - Include Japanese keywords for events like "イベント", "お知らせ", "特別展".
+// # Example of a good final query structure:
+// "横浜アンパンマンこどもミュージアム" (横浜市 OR 川崎市) "2025-08-16..2025-08-17"
+// # Output Instruction: Respond ONLY with a JSON object.
+// { "query": "..." }`;
+//     return await callGenerativeAi("個別深掘り", prompt);
+// }
+
+async function agentBroadEventSearcher(userData, searchArea) {
+    // interestsデータが配列か文字列かを判断し、適切に処理
+    let interestsQueryPart = '';
+    if (Array.isArray(userData.interests)) {
+        interestsQueryPart = userData.interests.join(' OR ');
+    } else if (typeof userData.interests === 'string') {
+        interestsQueryPart = userData.interests.replace(/,/g, ' OR ');
+    }
+
     const prompt = `
-# Role: Expert Local Scout
-# Task: Based on the user's profile and the designated search area, list the top 5 most promising venues and 2 reliable portal sites to search for weekend events.
+# Role: Expert Search Query Strategist
+# Task: Create a diverse set of 3-5 highly effective Google search queries to find local family-friendly events.
 # User Profile:
 ${JSON.stringify(userData, null, 2)}
-# Designated Search Area: "${searchArea}"
-# Guidelines:
-- Suggest specific, well-known facilities within the search area that match the user's interests.
-- Also include major portal sites like 'iko-yo.net' or 'walkerplus.com'.
-- For each suggestion, provide its name and a brief reason for your choice.
+# Search Area (formatted for Google): "${searchArea}"
+
+# Guidelines for Crafting Queries:
+1.  **Broad & Unquoted**: Use a wide variety of unquoted, family-focused keywords. Your primary keyword set should be \`(親子 OR 子連れ OR ファミリー OR キッズ OR 乳幼児 OR 未就学児 OR 赤ちゃん OR こども)\`.
+2.  **Combine with Area**: Each query MUST combine the keywords with the Search Area, enclosed in parentheses \`(...)\`.
+3.  **Use Negative Keywords**: Actively exclude irrelevant results. Add terms like \`-求人 -採用 -バイト -募集 -終了 -中止 -延期 -満席 -口コミ -レビュー\` to filter out job postings.
+4.  **Leverage Portal Sites**: Create queries that use the "site:" operator for major Japanese family event sites like "iko-yo.net" or "walkerplus.com".
+5.  **Diversity is Key**: Generate a mix of queries to cover different angles (e.g., a general kid event search, a search based on the user's specific interests, a portal site search).
+
+# Critical Restriction:
+- **DO NOT** add any of your own time-related keywords like "weekday", "weekend", "today", "今週末", etc. Time-based filtering is handled separately by the search tool itself. Your job is to focus only on the event theme and location.
+
+# Example of a PERFECT query set:
+- (親子 OR 子連れ OR ファミリー OR キッズ OR 乳幼児 OR 未就学児 OR 赤ちゃん OR こども) イベント (${searchArea}) -求人 -採用 -バイト -募集 -終了 -中止 -延期 -満席 -口コミ -レビュー
+- (${interestsQueryPart}) イベント (${searchArea}) -求人 -採用 -バイト -募集 -終了 -中止 -延期 -満席 -口コミ -レビュー
+- "イベント" site:iko-yo.net (${searchArea})
+
 # Output Instruction: Respond ONLY with a JSON object.
 {
-  "venues": [
-    { "name": "...", "reason": "..." },
-    { "name": "いこーよネット", "reason": "子供向けイベントの網羅性が高いポータルサイト" }
+  "queries": [
+    "...",
+    "...",
+    "..."
   ]
 }`;
-    return await callGenerativeAi("有望スポット発見", prompt);
-}
-
-async function agentSiteSpecificSearcher(venue, searchArea) {
-    const prompt = `
-# Role: Deep-Dive Search Specialist
-# Task: Create the most effective Google search query to find event information for a specific venue within a given area.
-# Target Venue:
-${JSON.stringify(venue, null, 2)}
-# Search Area: "${searchArea}"
-# Guidelines:
-- The query MUST include the Search Area to ensure geographic relevance.
-- If the venue name is a specific facility, combine it with the area.
-- If the venue is a portal site (like 'iko-yo.net'), use the "site:" operator.
-- Include Japanese keywords for events like "イベント", "お知らせ", "特別展".
-- Add time-related keywords like "今週末".
-# Output Instruction: Respond ONLY with a JSON object.
-{ "query": "..." }`;
-    return await callGenerativeAi("個別深掘り", prompt);
+    return await callGenerativeAi("広域イベント検索", prompt);
 }
 
 async function agentInspector(url, htmlContent, userData) {
+    if (!htmlContent) {
+        return null;
+    }
+    
+    // 日付の範囲を「今日から1ヶ月後まで」に設定
+    const today = new Date();
+    const oneMonthFromNow = new Date(today);
+    oneMonthFromNow.setMonth(today.getMonth() + 1);
+
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    const targetDateRange = `${formatDate(today)} to ${formatDate(oneMonthFromNow)}`;
+
     const prompt = `
 # Role: Meticulous Appraiser AI
-# Task: Analyze the provided HTML to classify the page, extract key information, AND assess if the event matches the user's interests.
+# Task: Analyze HTML to classify, extract, and assess if an event is a good match for the user within the next month.
 # User Profile:
 ${JSON.stringify(userData, null, 2)}
+# Target Date Range: Find events happening between ${targetDateRange}. Assume the current year is ${today.getFullYear()}.
 # URL: ${url}
 # HTML Content (first 15000 chars):
 ${htmlContent.substring(0, 15000)}
-# Analysis Steps & Rules:
-1.  **Classification**:
-    - **Single Event**: The page is dedicated to ONE specific event.
-    - **List Page**: The page contains a list of MULTIPLE distinct events. Key indicators are repetitive structures, "read more" links, and generic headings like "イベント一覧".
-    - **Irrelevant**: Not an event page.
-2.  **Extraction (if Single Event)**: Extract eventName, date, summary, location.
-3.  **Appraisal (if Single Event)**: Is this a good match for the user's interests?
+# Analysis Steps:
+1.  **Classification**: Is this page for a "Single Event", a "List Page", or "Irrelevant"?
+2.  **Extraction (if Single Event)**: Extract eventName, date, summary, location. For dates like "8月20日", assume it's for the current year (${today.getFullYear()}).
+3.  **Appraisal (if Single Event)**:
+    - Does the event match the user's interests?
+    - **CRITICAL DATE CHECK**: Does the extracted event 'date' fall within the Target Date Range (${targetDateRange})?
 # Output Instruction: Respond ONLY with a single JSON object.
-# - For a matching "Single Event":
+# - For a matching "Single Event" (Interests AND Date match):
 #   {"isValid": true, "isMatch": true, "isListPage": false, "eventName": "...", "date": "...", "summary": "...", "location": {"name": "...", "address": "..."}}
-# - For a non-matching "Single Event":
-#   {"isValid": true, "isMatch": false, "reason": "Event type does not match user interests."}
-# - For "List Page":
-#   {"isValid": false, "isMatch": false, "isListPage": true}
-# - For "Irrelevant":
-#   {"isValid": false, "isMatch": false, "isListPage": false}`;
+# - For a non-matching "Single Event" (Interests OR Date do NOT match):
+#   {"isValid": true, "isMatch": false, "reason": "Event date is outside the one-month target window." or "Event type does not match user interests."}
+# - For "List Page" / "Irrelevant":
+#   {"isValid": false, "isMatch": false, "isListPage": true or false}`;
     return await callGenerativeAi(`鑑定士`, prompt);
 }
-
 async function agentListPageAnalyzer(urls) {
-    const htmlContents = await Promise.all(urls.map(async (url) => {
-        const html = await toolGetHtmlContent(url);
-        return { url, html };
-    }));
+    const htmlContents = await Promise.all(
+    urls.map((url) =>
+       limit(async () => {
+         const html = await toolGetHtmlContent(url);
+         return { url, html };
+       })
+     )
+   );
     const validContents = htmlContents.filter(c => c.html);
     if (validContents.length === 0) return [];
     const prompt = `
@@ -386,7 +496,6 @@ ${JSON.stringify(candidates, null, 2)}
 2.  **Diversity Check**: Ensure the final selection includes a variety of event types and locations, if possible. Avoid suggesting only one type of event (e.g., all zoo events).
 3.  **Final Selection**: Choose up to 4 of the most unique, interesting, and relevant events for the user.
 4.  **Reasoning**: Briefly explain your selection logic in Japanese. Why did you choose these specific four?
-
 # Output Instruction: Respond ONLY with a JSON object with two keys: "final_candidates" (an array of the chosen candidate objects) and "reasoning" (a string).
 `;
     return await callGenerativeAi("最終選考AI", prompt);
@@ -403,7 +512,7 @@ ${JSON.stringify(alternatives, null, 2)}
 # Curation Process:
 1.  **Analyze the list**: What are the common themes among these alternatives? (e.g., educational, outdoors, arts & crafts).
 2.  **Create Categories**: Group the events into logical categories.
-3.  **Write Catchy Titles**: For each category, write an engaging title in Japanese that sparks curiosity. Examples: 「たまにはアートに触れるのはどう？」「学びがいっぱい！知的好奇心を満たす週末」「いつもと違う、ちょっとマニアックな体験」
+3.  **Write Catchy Titles**: For each category, write an engaging title in Japanese that sparks curiosity.
 # Output Instruction: Respond ONLY with a JSON object.
 {
   "categorized_alternatives": [
@@ -457,12 +566,41 @@ ${JSON.stringify(investigatedData, null, 2)}
 // =================================================================
 
 async function toolGoogleSearch(query, num = 10) {
-    if (!GOOGLE_API_KEY || !GOOGLE_CX) { return []; }
+    if (!GOOGLE_API_KEY || !GOOGLE_CX) { 
+        console.error("> Web検索中止: Google APIキーまたはCXが設定されていません。");
+        return []; 
+    }
+    
+    // --- ▼▼【ここからが今回の修正】▼▼ ---
+    // 実行環境を判定
+    const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+
+    // 環境に応じた最適な通信設定（Agent）を選択
+    let agent;
+    if (isEmulator) {
+      // ローカルエミュレータでは、特別な設定は不要（デフォルトのままが一番安定する）
+      agent = undefined;
+    } else {
+      // 本番環境では、安定化のために接続を使い回さない設定を使用
+      agent = new https.Agent({ keepAlive: false });
+    }
+    // --- ▲▲【ここまで】▲▲ ---
+
+    const dateRestrict = 'd[30]'; 
     const fullQuery = `${query}`.trim();
-    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(fullQuery)}&gl=jp&hl=ja&num=${num}`;
+    
+    console.log(`> [Google検索実行] クエリ: ${fullQuery}`);
+
+    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(fullQuery)}&gl=jp&hl=ja&num=${num}&dateRestrict=${dateRestrict}`;
+
     try {
-        const response = await fetch(url);
+        // fetchに、環境に応じた設定を適用
+        const response = await fetch(url, { agent });
         const data = await response.json();
+        if (data.error) {
+            console.error(`> Google Search APIエラー (クエリ: ${query}):`, JSON.stringify(data.error, null, 2));
+            return [];
+        }
         if (data.items) return data.items.map(item => ({ eventName: item.title, url: item.link }));
         return [];
     } catch (error) {
@@ -501,16 +639,69 @@ async function toolGetHtmlContent(url) {
     }
 }
 
+// =================================================================
+// ヘルパー関数
+// =================================================================
+
+async function callGenerativeAi(agentName, prompt, isJsonOutput = true) {
+    if (!genAI) {
+        console.error(`[${agentName}] Gemini AIが初期化されていません。`);
+        return null;
+    }
+    
+    const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash-latest",
+        generationConfig: {
+            temperature: 0.3,
+            responseMimeType: isJsonOutput ? "application/json" : "text/plain",
+        }
+    });
+
+    let attempt = 0;
+    const maxRetries = 3;
+    while (attempt < maxRetries) {
+        try {
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text();
+            if (!responseText) return null;
+            return isJsonOutput ? parseJsonFromAiResponse(responseText, agentName) : responseText.trim();
+        } catch (error) {
+            attempt++;
+            console.warn(`> [${agentName}]エージェントのエラー (試行 ${attempt}/${maxRetries}):`, error.message);
+            if (attempt >= maxRetries) {
+                console.error(`> [${agentName}]エージェントが最大リトライ回数に達しました。`);
+                return null;
+            }
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 2000));
+        }
+    }
+}
+
+function parseJsonFromAiResponse(text, agentName) {
+    if (!text) {
+        console.error(`[${agentName}] AIからの応答が空です。`);
+        return null;
+    }
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    let jsonString = match ? match[1] : text;
+    jsonString = jsonString.trim().replace(/,\s*([}\]])/g, '$1');
+
+    try {
+        return JSON.parse(jsonString);
+    } catch (error) {
+        console.error(`[${agentName}] JSONの解析に失敗しました。`, "解析対象:", jsonString, "エラー:", error);
+        return null;
+    }
+}
+
 async function findBestImageForEvent(candidate, htmlContent) {
     const imageCandidates = parseImagesFromHtml(candidate.url, htmlContent);
     if (imageCandidates.og_image || imageCandidates.image_list.length > 0) {
         const result = await agentVisualScout(candidate, imageCandidates);
         if (result && result.selectedImageUrl) {
-            console.log(`  > [画像抽出◎] 直接抽出に成功: ${candidate.eventName}`);
             return result.selectedImageUrl;
         }
     }
-    console.log(`  > [画像抽出△] 直接抽出に失敗。Google画像検索に切り替えます: ${candidate.eventName}`);
     const fallbackQuery = `${candidate.location.name} ${candidate.eventName}`;
     return await toolGoogleImageSearch(fallbackQuery);
 }
@@ -557,10 +748,6 @@ async function toolGoogleImageSearch(query) {
         return null;
     }
 }
-
-// =================================================================
-// HTML生成 & Firestore保存
-// =================================================================
 
 function generateHtmlResponse(plans, categorizedAlternatives, userId, location) {
     const plansHtml = plans.map(plan => {
@@ -628,22 +815,40 @@ function generateHtmlResponse(plans, categorizedAlternatives, userId, location) 
 
 async function savePlansToFirestore(plans, userId) {
   const db = admin.firestore();
-  const collectionRef = db.collection("users").doc(userId).collection("suggestedPlans");
+  // ▼▼▼ userRefをここで定義します ▼▼▼
+  const userRef = db.collection("users").doc(userId);
+  const collectionRef = userRef.collection("suggestedPlans");
+
+  // 既存のプランを削除するバッチ
   const snapshot = await collectionRef.get();
   if (!snapshot.empty) {
     const deleteBatch = db.batch();
     snapshot.docs.forEach(doc => { deleteBatch.delete(doc.ref); });
     await deleteBatch.commit();
+    console.log(`> ユーザーID: ${userId} の古いプランを削除しました。`);
   }
-  if (!plans || plans.length === 0) return;
+
+  // プランがない場合はステータスだけ更新して終了
+  if (!plans || plans.length === 0) {
+    await userRef.set({ planGenerationStatus: 'completed' }, { merge: true });
+    console.log(`> ユーザーID: ${userId} のプランが見つからなかったため、ステータスを'completed'に更新しました。`);
+    return;
+  }
+
+  // 新しいプランを追加するバッチ
   const addBatch = db.batch();
   plans.forEach((plan) => {
     const planRef = collectionRef.doc();
     addBatch.set(planRef, {
       ...plan,
       createdAt: FieldValue.serverTimestamp(),
-      version: "5.2-with-alternatives"
+      version: "5.6-logic-protected"
     });
   });
+  
+  // プラン保存と同時に、ユーザーのステータスを 'completed' に更新
+  addBatch.set(userRef, { planGenerationStatus: 'completed' }, { merge: true });
+  console.log(`> ユーザーID: ${userId} のステータスを 'completed' に更新するバッチを追加しました。`);
+  
   return addBatch.commit();
 }

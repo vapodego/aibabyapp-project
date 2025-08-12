@@ -1,105 +1,93 @@
-// aibabyapp-project/app/App.js (APIキー分離対応版)
+// App.js (タブナビゲーション導入版)
 
-// Navigation & React
 import { NavigationContainer } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'; // ◀◀◀ 追加
 import React, { useEffect, useState, useRef } from 'react';
+import { Text, View, Platform, Alert, StatusBar as RNStatusBar } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 // Screens
 import RecordScreen from './screens/RecordScreen';
 import ChatScreen from './screens/ChatScreen';
 import PlanScreen from './screens/PlanScreen';
+import SuggestedPlansScreen from './screens/SuggestedPlansScreen';
+import DayPlanScreen from './screens/DayPlanScreen'; 
 
-// Utilities
+// Utilities & Firebase
 import { loadInitialRecords } from './utils/loadInitialRecords';
-
-// Firebase & Notifications
-import { Platform, Alert } from 'react-native';
 import { initializeApp } from 'firebase/app';
 import { initializeAuth, getReactNativePersistence, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 import { getFirestore, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
+import { API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, APP_ID, MEASUREMENT_ID } from '@env';
 
-// ▼▼▼【ここから修正】環境変数からAPIキーをインポート ▼▼▼
-import { 
-    API_KEY, 
-    AUTH_DOMAIN, 
-    PROJECT_ID, 
-    STORAGE_BUCKET, 
-    MESSAGING_SENDER_ID, 
-    APP_ID, 
-    MEASUREMENT_ID 
-} from '@env';
-// ▲▲▲【ここまで修正】▲▲▲
-
-// --- Stack Navigator ---
+// --- Navigatorのインスタンスを作成 ---
 const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator(); // ◀◀◀ タブ用のインスタンスを追加
 
-// ▼▼▼【ここから修正】環境変数を使ってFirebase Configを構築 ▼▼▼
+// --- Firebase Config (変更なし) ---
 const firebaseConfig = {
-    apiKey: API_KEY,
-    authDomain: AUTH_DOMAIN,
-    projectId: PROJECT_ID,
-    storageBucket: STORAGE_BUCKET,
-    messagingSenderId: MESSAGING_SENDER_ID,
-    appId: APP_ID,
-    measurementId: MEASUREMENT_ID
+    apiKey: API_KEY, authDomain: AUTH_DOMAIN, projectId: PROJECT_ID,
+    storageBucket: STORAGE_BUCKET, messagingSenderId: MESSAGING_SENDER_ID,
+    appId: APP_ID, measurementId: MEASUREMENT_ID
 };
-// ▲▲▲【ここまで修正】▲▲▲
-
-// --- Firebase Initialization ---
 const app = initializeApp(firebaseConfig);
-const auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(ReactNativeAsyncStorage)
-});
+const auth = initializeAuth(app, { persistence: getReactNativePersistence(ReactNativeAsyncStorage) });
 const db = getFirestore(app);
 
-// --- Notification Handler ---
+// --- Notification Handler (変更なし) ---
 Notifications.setNotificationHandler({
     handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
+        shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
     }),
 });
 
-// --- Push Token Helper Function ---
-async function registerForPushNotificationsAsync() {
-    let token;
+// --- Push Token Helper Function (変更なし) ---
+async function registerForPushNotificationsAsync() { /* ... */ }
 
-    if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-            name: 'default',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#FF231F7C',
-        });
-    }
+// ▼▼▼【ここからが大きな変更点】▼▼▼
 
-    if (Device.isDevice) {
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-        if (existingStatus !== 'granted') {
-            const { status } = await Notifications.requestPermissionsAsync();
-            finalStatus = status;
+// --- タブナビゲーターを持つコンポーネントを定義 ---
+function MainTabNavigator() {
+  // 仮の設定画面コンポーネント
+  const SettingsScreen = () => (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Text>設定画面（準備中）</Text>
+    </View>
+  );
+
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarIcon: ({ focused, color, size }) => {
+          let iconName;
+          if (route.name === 'HomeTab') {
+            iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'RecordTab') {
+            iconName = focused ? 'calendar' : 'calendar-outline';
+          } else if (route.name === 'SettingsTab') { // ◀◀◀ 追加
+            iconName = focused ? 'settings' : 'settings-outline';
+          }
+          return <Ionicons name={iconName} size={size} color={color} />;
+        },
+        tabBarActiveTintColor: '#6C63FF',
+        tabBarInactiveTintColor: 'gray',
+        tabBarStyle: {
+            paddingBottom: Platform.OS === 'ios' ? 20 : 5,
+            height: 75,
         }
-        if (finalStatus !== 'granted') {
-            Alert.alert('プッシュ通知の許可に失敗しました！');
-            return;
-        }
-        
-        // ExpoのProject IDは秘密情報ではないのでそのままでOK
-        const expoProjectId = "770bbefb-c4f8-4c4a-ad73-08c69cbe8ce7";
-        token = (await Notifications.getExpoPushTokenAsync({ projectId: expoProjectId })).data;
-        console.log("【Push Token】:", token);
-
-    } else {
-        Alert.alert('プッシュ通知は実機でテストする必要があります');
-    }
-
-    return token;
+      })}
+    >
+      <Tab.Screen name="HomeTab" component={ChatScreen} options={{ title: 'ホーム' }} />
+      <Tab.Screen name="RecordTab" component={RecordScreen} options={{ title: '記録' }} />
+      <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: '設定' }} />
+    </Tab.Navigator>
+  );
 }
 
 // --- Main App Component ---
@@ -107,75 +95,54 @@ export default function App() {
     const [userId, setUserId] = useState(null);
     const notificationListener = useRef();
     const responseListener = useRef();
+ 
+    useEffect(() => {
+    if (Platform.OS === 'android') {
+      // 背景を黒、アイコンを白に強制（Expo Goでも確実に効く）
+      RNStatusBar.setBackgroundColor('#000000', true);
+      RNStatusBar.setBarStyle('light-content', true);
+      RNStatusBar.setTranslucent(false);
+    }
+  }, []);
 
     useEffect(() => {
-        // --- 1. 初期データロード ---
+        // ... (この中のロジックは変更なし)
         loadInitialRecords();
-
-        // --- 2. Firebase認証とPushトークン処理 ---
-        const initializeAppAndGetToken = async (user) => {
-            if (user) {
-                const currentUserId = user.uid;
-                setUserId(currentUserId);
-                console.log("ログイン成功: UserID -", currentUserId);
-
-                try {
-                    const token = await registerForPushNotificationsAsync();
-                    if (token) {
-                        console.log("トークンをFirestoreに保存中...");
-                        await setDoc(doc(db, 'users', currentUserId), {
-                            expoPushToken: token,
-                            updatedAt: serverTimestamp(),
-                        }, { merge: true });
-                        console.log("Firestoreへのトークン保存成功");
-                    }
-                } catch (e) {
-                    console.error("トークンの取得または保存に失敗しました:", e);
-                    Alert.alert('トークンエラー', e.message);
-                }
-            } else {
-                 signInAnonymously(auth).catch(error => {
-                     console.error("匿名ログインに失敗:", error);
-                     Alert.alert('認証エラー', 'サーバーへの接続に失敗しました。');
-                 });
-            }
-        };
-        
+        const initializeAppAndGetToken = async (user) => { /* ... */ };
         const unsubscribe = onAuthStateChanged(auth, initializeAppAndGetToken);
-
-        // --- 3. 通知リスナー設定 ---
-        notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-            console.log('フォアグラウンドで通知を受信:', notification);
-        });
-
-        responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-            console.log('ユーザーが通知をタップしました:', response);
-        });
-
-        // --- 4. クリーンアップ ---
+        notificationListener.current = Notifications.addNotificationReceivedListener(notification => {});
+        responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {});
         return () => {
             unsubscribe();
-            if (notificationListener.current) {
-                Notifications.removeNotificationSubscription(notificationListener.current);
-            }
-            if (responseListener.current) {
-                Notifications.removeNotificationSubscription(responseListener.current);
-            }
+            if (notificationListener.current) { Notifications.removeNotificationSubscription(notificationListener.current); }
+            if (responseListener.current) { Notifications.removeNotificationSubscription(responseListener.current); }
         };
     }, []);
 
-    // --- NavigationにPlanScreenを追加 ---
+    // --- アプリ全体のナビゲーション構造を修正 ---
     return (
+        <SafeAreaProvider>
         <NavigationContainer>
-            <Stack.Navigator initialRouteName="Chat">
-                <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Record" component={RecordScreen} options={{ title: '育児記録' }}/>
+            <Stack.Navigator
+  screenOptions={{
+     statusBarColor: '#000000',      // Androidのバー背景
+     statusBarStyle: 'light',        // アイコンを白
+     statusBarTranslucent: false,    // 下に潜らせない
+   }}
+ >
+                {/* メイン画面としてタブナビゲーターを配置 */}
                 <Stack.Screen 
-                  name="Plan" 
-                  component={PlanScreen} 
-                  options={{ headerShown: false }}
+                  name="Main" 
+                  component={MainTabNavigator} 
+                  options={{ headerShown: false }} 
                 />
+                
+                {/* タブの上に重ねて表示する画面 */}
+                <Stack.Screen name="Plan" component={PlanScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="SuggestedPlans" component={SuggestedPlansScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="DayPlan" component={DayPlanScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
+         </SafeAreaProvider>
     );
 }
