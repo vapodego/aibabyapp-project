@@ -1,75 +1,62 @@
 /**
  * =================================================================
- * 情報抽出エージェント (agents/informationExtractor.js) - v1.0
+ * 情報抽出エージェント (agents/informationExtractor.js) - リファクタリング版
  * =================================================================
- * - 担当: Gemini
- * - 目的: 指定されたURLのWebページを読み取り、Geminiの能力を使って
- * イベント名と開催地の住所を正確に抽出します。
  */
 
 const fetch = require('node-fetch');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const functions = require("firebase-functions");
-
-// --- 初期化 ---
-const GEMINI_API_KEY = functions.config().gemini?.key;
-let genAI;
-if (GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-}
-
-async function callGeminiForExtraction(htmlContent) {
-    if (!genAI) {
-        console.error("Gemini APIキーが設定されていません。");
-        return null;
-    }
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
-    const prompt = `
-# 指示
-以下のHTMLコンテンツを分析し、開催されるイベントの正式名称と、その開催地の正確な住所を特定してください。
-
-# 制約
-- 回答は必ずJSON形式で、"eventName"と"eventAddress"の2つのキーのみを含むオブジェクトとしてください。
-- 住所は都道府県から建物名や部屋番号まで、可能な限り詳細に記述してください。
-- もし情報が見つからない場合は、キーの値をnullにしてください。
-
-# HTMLコンテンツ
-${htmlContent.substring(0, 15000)}...
-
-# 出力形式
-{
-  "eventName": "...",
-  "eventAddress": "..."
-}
-`;
-
-    try {
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-        if (jsonMatch && jsonMatch[1]) {
-            return JSON.parse(jsonMatch[1]);
-        }
-        return JSON.parse(text);
-    } catch (error) {
-        console.error("[Information Extractor] Geminiによる情報抽出中にエラー:", error);
-        return null;
-    }
-}
+// ★★★ 共有ユーティリティから、リトライ機能付きのAI呼び出し関数を読み込む
+const { callGenerativeAi } = require('../utils');
 
 async function extractEventInfoFromUrl(url) {
+    console.log(`[Extractor Agent] URLの処理を開始します: ${url}`);
     try {
-        const response = await fetch(url, { timeout: 10000 });
+        const response = await fetch(url, {
+            timeout: 10000, redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
+        });
+
         if (!response.ok) {
-            console.error(`[Information Extractor] URLの取得に失敗しました。Status: ${response.status}`);
+            console.error(`[Extractor Agent] URLの取得に失敗しました。`);
             return null;
         }
+
         const html = await response.text();
-        const extractedData = await callGeminiForExtraction(html);
+        if (!html || html.trim().length < 100) {
+            console.error("[Extractor Agent] 取得したHTMLが短すぎるため、処理を中断します。");
+            return null;
+        }
+        
+        const prompt = `
+# 指示
+以下のHTMLコンテンツからイベント情報を抽出し、指定されたJSON形式で出力してください。
+
+# タスク詳細
+1.  **eventName**: イベントの正式名称を抽出します。
+2.  **venueName**: HTMLコンテンツから、イベントが開催される主要な施設名（例：「ランドマークプラザ」）を特定し、抽出してください。
+3.  **eventAddress**: イベントの開催地の住所を抽出します。「所在地」「アクセス」等の見出しの近くを探してください。
+4.  **eventDateString**: ウェブサイトに記載されている開催日や期間の文字列を、変更せずそのまま抽出します。(例: "2025年7月19日(土)～9月3日(日)")
+5.  **planningDate**: 上記の\`eventDateString\`からイベントの**開始日**を特定し、必ず「YYYY年M月D日」の形式に変換してください。
+
+# 制約
+- 情報が見つからないキーの値は \`null\` としてください。
+
+# HTMLコンテンツ
+${html.substring(0, 30000)}
+
+# 出力形式 (JSONのみ)
+`;
+        
+        // ★★★ 共有のAI呼び出し関数を使用。高性能なproモデルを指定する
+        const extractedData = await callGenerativeAi(prompt, true, "gemini-1.5-pro-latest");
+
+        if(extractedData) {
+            extractedData.eventUrl = url;
+        }
         return extractedData;
 
     } catch (error) {
-        console.error(`[Information Extractor] URL処理中にエラー: ${url}`, error);
+        console.error(`[Extractor Agent] URL処理中に致命的なエラーが発生しました:`, error);
         return null;
     }
 }

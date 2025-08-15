@@ -50,7 +50,7 @@ exports.generateSuperDetailedPlan = functions
       
       if (comprehensiveNavigationData) {
         console.log('[DEBUG] generateSuperDetailedPlan: 収集データを元にHTMLレポートを生成します...');
-        createComprehensiveHtmlReport(comprehensiveNavigationData);
+        //createComprehensiveHtmlReport(comprehensiveNavigationData);
       }
 
       const detailedPlan = {

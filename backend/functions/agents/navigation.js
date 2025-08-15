@@ -1,180 +1,143 @@
 /**
  * =================================================================
- * ナビゲーションエージェント (agents/navigation.js) - v4.17 完全版
+ * ナビゲーション・エージェント (agents/navigation.js) - v2.2 保守性向上版
  * =================================================================
  * - 担当: Gemini
- * - 修正点:
- * - ユーザーの的確なご指摘を受け、ファイルが不完全な状態になっていた問題を解消するため、
- * 省略箇所の一切ない、完全なコードとして再提供します。
- * - これまでのデバッグで成功した全てのロジック（エラーハンドリング、ジオコーディング等）を含んでいます。
+ * - 修正点: ユーザーの指摘に基づき、将来的な機能復活を容易にするため、
+ * 公共交通機関関連のロジックを削除するのではなく、コメントアウトに変更。
  */
 
 const functions = require("firebase-functions");
 const fetch = require('node-fetch');
-const { toolGetDirections, toolSearchPlaces, toolGetCoordinates, toolGetPlaceDetails } = require('../utils/api-tools');
+const { getGeocodedLocation } = require('../utils/geocoder');
 
-// --- NAVITIME API 実装 ---
-const NAVITIME_API_KEY = functions.config().navitime?.key;
-const NAVITIME_HOST = functions.config().navitime?.host;
+const GOOGLE_API_KEY = functions.config().google?.key;
+const RAPIDAPI_KEY = functions.config().rapidapi?.key;
 
-async function getTransitDirectionsFromNavitime(origin, destination) {
-    try {
-        if (!NAVITIME_API_KEY || !NAVITIME_HOST) {
-            throw new Error("NAVITIMEのAPIキーまたはホストが設定されていません。");
-        }
+/**
+ * Google Maps Directions APIを使い、詳細な車ルートを取得する
+ */
+async function getCarRoute(startLatLon, endLatLon) {
+  if (!GOOGLE_API_KEY) {
+    console.error("Google APIキーが設定されていません。");
+    return null;
+  }
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${startLatLon}&destination=${endLatLon}&key=${GOOGLE_API_KEY}&language=ja&mode=driving`;
+  
+  console.log(`[Google Maps Directions API] Requesting URL...`);
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
 
-        console.log(`[GEOCODER] 出発地をジオコーディング中: ${origin}`);
-        const originCoords = await toolGetCoordinates(origin);
-        console.log(`[GEOCODER] 目的地をジオコーディング中: ${destination}`);
-        const destinationCoords = await toolGetCoordinates(destination);
+    if (data.status === 'OK' && data.routes.length > 0) {
+      const route = data.routes[0];
+      const leg = route.legs[0];
+      
+      const highways = leg.steps
+        .filter(step => step.html_instructions.includes('有料道路'))
+        .map(step => step.html_instructions.replace(/<[^>]*>/g, ''))
+        .join(', ');
 
-        if (!originCoords || !destinationCoords) {
-            throw new Error("出発地または目的地のジオコーディングに失敗しました。");
-        }
-
-        const startLocation = `${originCoords.lat},${originCoords.lng}`;
-        const goalLocation = `${destinationCoords.lat},${destinationCoords.lng}`;
-        console.log(`[GEOCODER] 変換完了: ${startLocation} -> ${goalLocation}`);
-
-        const startTime = new Date(Date.now() + 9 * 60 * 60 * 1000 + 10 * 60 * 1000).toISOString().slice(0, 19);
-
-        const params = new URLSearchParams({
-            start: startLocation,
-            goal: goalLocation,
-            start_time: startTime,
-            search_type: 'departure',
-            results: 1,
-            sort: 'time',
-        });
-        
-        const url = `https://${NAVITIME_HOST}/route_transit?${params.toString()}`;
-        console.log(`[NAVITIME API] Requesting URL: ${url}`);
-
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'X-RapidAPI-Key': NAVITIME_API_KEY,
-                'X-RapidAPI-Host': NAVITIME_HOST
-            }
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.json();
-            throw new Error(`NAVITIME API request failed with status ${response.status}. Message: ${errorBody.message}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data && data.items) {
-            return { status: 'success', raw_navitime_response: data };
-        } else {
-            throw new Error('Unexpected response format from NAVITIME API.');
-        }
-
-    } catch (error) {
-        console.error("[NAVITIME API ERROR]", error);
-        return { status: 'error', message: error.message };
+      const tollInfo = route.fare ? `${route.fare.text}` : "情報なし";
+      
+      return {
+        route_type: 'car',
+        summary: `車で約${leg.duration.text} (${leg.distance.text})`,
+        duration: leg.duration.text,
+        distance: leg.distance.text,
+        details: {
+          highways: highways || "一般道のみ",
+          tolls: tollInfo
+        },
+        map_polyline: route.overview_polyline.points, 
+        raw_google_response: data,
+      };
     }
+    return null;
+  } catch (error) {
+    console.error("[Google Maps Directions API] エラー:", error);
+    return null;
+  }
 }
 
-// --- ヘルパー関数 ---
-function extractStations(navitimeRaw) {
-    if (!navitimeRaw || !navitimeRaw.items || !navitimeRaw.items[0]) return [];
-    return navitimeRaw.items[0].sections
-        .filter(s => s.type === 'point' && s.node_types?.includes('station'))
-        .map(s => ({ name: s.name, lat: s.coord?.lat, lon: s.coord?.lon }));
-}
+/*
+// =================================================================
+// ▼▼▼【ここから下は、将来復活させる公共交通機関のロジックです】▼▼▼
+// =================================================================
 
-async function searchFacilitiesAroundStations(stations) {
-    const facilitiesData = {};
-    const searchKeywords = {
-        nursingRooms: "授乳室|ベビー休憩室",
-        elevators: "エレベーター",
-        accessibleToilets: "多目的トイレ|多機能トイレ"
+async function getTransitRoute(startLatLon, endLatLon, startTime = new Date()) {
+    if (!RAPIDAPI_KEY) {
+        console.error("RapidAPIキーが設定されていません。");
+        return null;
+    }
+    const [startLat, startLon] = startLatLon.split(',');
+    const [endLat, endLon] = endLatLon.split(',');
+
+    const url = new URL('https://navitime-route-totalnavi.p.rapidapi.com/route_transit');
+    const params = {
+        start: `${startLat},${startLon}`,
+        goal: `${endLat},${endLon}`,
+        start_time: startTime.toISOString().slice(0, 16).replace('T', ' '),
+        results: '1',
+        sort: 'time',
     };
-    for (const station of stations) {
-        if (station.name && station.lat && station.lon) {
-            console.log(`[FACILITY SCOUT] ${station.name}駅周辺の施設を検索中...`);
-            facilitiesData[station.name] = { nursingRooms: [], elevators: [], accessibleToilets: [] };
-            const location = `${station.lat},${station.lon}`;
-            for (const [key, keyword] of Object.entries(searchKeywords)) {
-                const places = await toolSearchPlaces(location, keyword);
-                if (places && places.length > 0) {
-                    const placesWithDetails = [];
-                    for (let i = 0; i < places.length && i < 1; i++) {
-                        const place = places[i];
-                        if (place.place_id) {
-                            const details = await toolGetPlaceDetails(place.place_id);
-                            placesWithDetails.push({ ...place, details });
-                        } else {
-                            placesWithDetails.push(place);
-                        }
-                    }
-                    facilitiesData[station.name][key] = placesWithDetails;
-                }
-            }
-        } else {
-            console.warn(`[FACILITY SCOUT] ${station.name || '不明な駅'}の座標情報が不完全なため、施設検索をスキップします。`);
+    url.search = new URLSearchParams(params).toString();
+
+    console.log(`[NAVITIME API] Requesting URL: ${url.href}`);
+    
+    const response = await fetch(url.href, {
+        method: 'GET',
+        headers: {
+            'X-RapidAPI-Key': RAPIDAPI_KEY,
+            'X-RapidAPI-Host': 'navitime-route-totalnavi.p.rapidapi.com'
         }
+    });
+
+    if (!response.ok) {
+        console.error(`Navitime API Error: ${response.status} ${response.statusText}`);
+        return null;
     }
-    return facilitiesData;
+    const data = await response.json();
+    return data;
 }
 
-async function getDetailedWalkingRoutes(navitimeRaw, originAddress, destinationAddress) {
-    if (!navitimeRaw || !navitimeRaw.items || !navitimeRaw.items[0]) return { start: null, end: null };
-    const sections = navitimeRaw.items[0].sections;
-    const points = sections.filter(s => s.type === 'point');
-    const firstStation = points.find(p => p.node_types?.includes('station'));
-    const lastStation = points.slice().reverse().find(p => p.node_types?.includes('station'));
-    let startWalk = null;
-    let endWalk = null;
-
-    if (firstStation?.coord?.lat && firstStation?.coord?.lon) {
-        console.log(`[WALK ROUTE] 自宅 -> ${firstStation.name}駅 の徒歩ルートを検索中...`);
-        const firstStationCoords = `${firstStation.coord.lat},${firstStation.coord.lon}`;
-        startWalk = await toolGetDirections(originAddress, firstStationCoords, 'walking');
-    } else {
-        console.warn(`[WALK ROUTE] 最初の駅の座標が不完全なため、徒歩ルート(start)の検索をスキップします。`);
-    }
-
-    if (lastStation?.coord?.lat && lastStation?.coord?.lon) {
-        console.log(`[WALK ROUTE] ${lastStation.name}駅 -> 目的地 の徒歩ルートを検索中...`);
-        const lastStationCoords = `${lastStation.coord.lat},${lastStation.coord.lon}`;
-        endWalk = await toolGetDirections(lastStationCoords, destinationAddress, 'walking');
-    } else {
-        console.warn(`[WALK ROUTE] 最後の駅の座標が不完全なため、徒歩ルート(end)の検索をスキップします。`);
-    }
-
-    return { start: startWalk, end: endWalk };
-}
+// =================================================================
+// ▲▲▲【ここまでが、将来復活させる公共交通機関のロジックです】▲▲▲
+// =================================================================
+*/
 
 
 /**
- * ナビゲーションエージェントのメイン機能
+ * ナビゲーション計画のメイン関数
  */
-async function agentNavigationPlanning(originAddress, basePlan) {
-    try {
-        console.log('[AGENT] ナビゲーションエージェントが起動しました。');
-        const navitimeRoute = await getTransitDirectionsFromNavitime(originAddress, basePlan.location.address);
-        
-        if (navitimeRoute.status !== 'success' || !navitimeRoute.raw_navitime_response.items) {
-            throw new Error(navitimeRoute.message || "NAVITIME APIから有効な経路が取得できませんでした。");
-        }
-        console.log('[AGENT] ステップ1/3: 公共交通機関ルートの取得完了 (LIVE)');
-        const transitStations = extractStations(navitimeRoute.raw_navitime_response);
-        const stationFacilities = await searchFacilitiesAroundStations(transitStations);
-        console.log('[AGENT] ステップ2/3: 乗り換え駅の施設情報収集完了');
-        const detailedWalks = await getDetailedWalkingRoutes(navitimeRoute.raw_navitime_response, originAddress, basePlan.location.address);
-        console.log('[AGENT] ステップ3/3: 詳細な徒歩ルートの取得完了');
-        const comprehensiveData = { navitimeRoute, stationFacilities, detailedWalks, basePlan };
-        console.log('[AGENT] ナビゲーションエージェントの処理が正常に完了しました。');
-        return comprehensiveData;
-    } catch (error) {
-        console.error('[AGENT ERROR] ナビゲーションエージェントの処理中にエラーが発生しました:', error.message);
-        return null; // エラー発生時は明確にnullを返す
-    }
-}
+exports.agentNavigationPlanning = async (origin, destination, mode = 'transit') => {
+  console.log(`[AGENT] ナビゲーションエージェントが起動しました。モード: ${mode}`);
+  
+  const startCoords = await getGeocodedLocation(origin);
+  const destinationAddress = typeof destination === 'string' ? destination : destination.location?.address;
+  if (!destinationAddress) {
+      throw new Error(`目的地の住所が不完全です。`);
+  }
+  const endCoords = await getGeocodedLocation(destinationAddress);
 
-module.exports = {
-    agentNavigationPlanning
+  if (!startCoords || !endCoords) {
+      throw new Error(`ジオコーディングに失敗`);
+  }
+  
+  let routeData = null;
+  if (mode === 'car') {
+    console.log('[AGENT] 車ルートを検索します...');
+    routeData = await getCarRoute(`${startCoords.lat},${startCoords.lng}`, `${endCoords.lat},${endCoords.lng}`);
+  } else {
+    // 公共交通機関のロジックは現在無効化されています
+    console.log('[AGENT] 公共交通機関ルートを検索します... (現在無効化中)');
+    // routeData = await getTransitRoute(`${startCoords.lat},${startCoords.lng}`, `${endCoords.lat},${endCoords.lng}`);
+    routeData = { route_type: 'transit', summary: '公共交通機関での移動（現在無効化中）' };
+  }
+  
+  console.log('[AGENT] ナビゲーションエージェントの処理が正常に完了しました。');
+  return {
+    mode: mode,
+    route: routeData,
+  };
 };

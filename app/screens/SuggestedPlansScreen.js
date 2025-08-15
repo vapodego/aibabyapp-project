@@ -3,23 +3,21 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getFirestore, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+// ▼▼▼【修正点】signInAnonymouslyを追加▼▼▼
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getApp } from 'firebase/app';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import mockPlans from '../mock/suggestedPlans.js';
 
-// --- ヘルパーコンポーONENT ---
-// 詳細モーダル内のセクションをきれいに表示するための部品
+// --- ヘルパーコンポーネント ---
 const DetailSection = ({ icon, title, children }) => (
   <View style={styles.detailSection}>
     <View style={styles.detailSectionHeader}>
       <Ionicons name={icon} size={20} color="#FF6347" />
       <Text style={styles.detailSectionTitle}>{title}</Text>
     </View>
-    <View style={styles.detailSectionContent}>
-      {children}
-    </View>
+    <View style={styles.detailSectionContent}>{children}</View>
   </View>
 );
 
@@ -74,11 +72,25 @@ const SuggestedPlansScreen = ({ navigation }) => {
     }
     setIsPlanning(selectedPlan.url);
     try {
+      // ▼▼▼【修正点】AIを呼び出す前に認証チェックを追加▼▼▼
+      let user = auth.currentUser;
+      if (!user) {
+        console.log("ユーザーが未認証のため、匿名サインインを試みます...");
+        await signInAnonymously(auth);
+        user = auth.currentUser;
+      }
+      if (!user) {
+        throw new Error('認証に失敗しました。アプリを再起動してみてください。');
+      }
+      // ▲▲▲【ここまで】▲▲▲
+      
+      console.log(`認証OK (UID: ${user.uid})。dayPlannerを呼び出します...`);
       const originAddress = await AsyncStorage.getItem('user_location');
       const result = await planDayFromUrl({ 
           eventUrl: selectedPlan.url, 
           originAddress: originAddress 
       });
+
       if (result.data.status === 'success' && result.data.plan) {
         setModalVisible(false);
         navigation.navigate('DayPlan', { detailedPlan: result.data.plan });
@@ -120,10 +132,8 @@ const SuggestedPlansScreen = ({ navigation }) => {
               <Image source={{ uri: item.imageUrl || 'https://placehold.co/600x400' }} style={styles.cardImage} />
               <View style={styles.cardContent}>
                 <Text style={styles.planTitle}>{item.planName}</Text>
-                {/* ▼▼▼【ここが復活した部分です】▼▼▼ */}
                 <Text style={styles.planEvent}>{item.eventName}</Text>
                 <Text style={styles.planSummary} numberOfLines={3}>{item.summary}</Text>
-                {/* ▲▲▲【ここまで】▲▲▲ */}
                 <TouchableOpacity 
                   style={styles.decisionButton} 
                   onPress={() => handleShowDetails(item)}
@@ -157,35 +167,28 @@ const SuggestedPlansScreen = ({ navigation }) => {
                 {selectedPlan.location?.name && <Text style={styles.modalLocation}>場所: {selectedPlan.location.name}</Text>}
                 <Text style={styles.modalSummary}>{selectedPlan.summary}</Text>
                 
-                {/* ▼▼▼【ここが新しくなった詳細表示です】▼▼▼ */}
                 {selectedPlan.strategicGuide && (
                     <>
                         <DetailSection icon="heart-outline" title="このプランがあなたに最適な理由">
                             <Text style={styles.detailText}>{selectedPlan.strategicGuide.whySpecial}</Text>
                         </DetailSection>
-
                         <DetailSection icon="navigate-circle-outline" title="アクセス・基本情報">
                             <Text style={styles.detailText}>{selectedPlan.strategicGuide.logistics}</Text>
                         </DetailSection>
-
                         <DetailSection icon="happy-outline" title="赤ちゃん安心情報">
                             <Text style={styles.detailText}>{selectedPlan.strategicGuide.babyInfo}</Text>
                         </DetailSection>
-
                         <DetailSection icon="list-outline" title="モデルプラン">
                             <Text style={styles.detailText}>{selectedPlan.strategicGuide.sampleItinerary}</Text>
                         </DetailSection>
-
                         <DetailSection icon="briefcase-outline" title="持ち物リスト">
                             <Text style={styles.detailText}>{selectedPlan.strategicGuide.packingList}</Text>
                         </DetailSection>
-                        
                         <DetailSection icon="rainy-outline" title="もしもの時の代替案">
                              <Text style={styles.detailText}>{selectedPlan.alternativePlan}</Text>
                         </DetailSection>
                     </>
                 )}
-                {/* ▲▲▲【ここまで】▲▲▲ */}
                 
                 <TouchableOpacity 
                   style={styles.modalDecisionButton} 
@@ -208,8 +211,13 @@ const SuggestedPlansScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  // ... (既存のスタイルは変更なし) ...
-  // --- カード ---
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#F7F7F7' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 16, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#EEE' },
+  backButton: { padding: 4 },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  emptyText: { fontSize: 18, color: 'gray' },
+  listContainer: { padding: 16 },
   planCard: { backgroundColor: 'white', borderRadius: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5, overflow: 'hidden' },
   cardImage: { width: '100%', height: 180 },
   cardContent: { padding: 16 },
@@ -218,8 +226,6 @@ const styles = StyleSheet.create({
   planSummary: { fontSize: 14, color: '#666', lineHeight: 21, marginBottom: 16 },
   decisionButton: { backgroundColor: '#007AFF', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
   buttonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  
-  // --- モーダル ---
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   modalContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '85%', backgroundColor: '#F7F7F7', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
   modalHeader: { alignItems: 'center', paddingVertical: 12, backgroundColor: 'white' },
@@ -234,35 +240,11 @@ const styles = StyleSheet.create({
   modalSummary: { fontSize: 16, color: '#555', lineHeight: 26, marginBottom: 24, fontStyle: 'italic', textAlign: 'center' },
   modalDecisionButton: { backgroundColor: '#FF6347', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 32, marginBottom: 40 },
   modalButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
-
-  // --- 詳細セクション ---
-  detailSection: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#EFEFEF'
-  },
-  detailSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  detailSectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginLeft: 8,
-  },
-  detailSectionContent: {
-    paddingLeft: 2, // アイコンとテキストのインデントを合わせる
-  },
-  detailText: {
-    fontSize: 15,
-    color: '#555',
-    lineHeight: 24,
-  },
+  detailSection: { backgroundColor: 'white', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#EFEFEF' },
+  detailSectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, },
+  detailSectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 8 },
+  detailSectionContent: { paddingLeft: 2 },
+  detailText: { fontSize: 15, color: '#555', lineHeight: 24 },
 });
 
 export default SuggestedPlansScreen;

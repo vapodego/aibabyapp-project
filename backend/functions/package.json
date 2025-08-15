@@ -17,12 +17,14 @@
     "@google-cloud/pubsub": "^5.1.0",
     "@google/generative-ai": "^0.14.1",
     "@googlemaps/google-maps-services-js": "^3.4.2",
+    "@mapbox/polyline": "^1.2.1",
     "expo-server-sdk": "^3.15.0",
     "firebase-admin": "^12.1.0",
     "firebase-functions": "^5.0.1",
     "jsdom": "^24.0.0",
-    "openai": "^5.11.0",
-    "p-limit": "^3.1.0"
+    "openai": "^5.12.2",
+    "p-limit": "^3.1.0",
+    "react-native-maps": "^1.25.3"
   },
   "devDependencies": {
     "eslint": "^8.15.0",

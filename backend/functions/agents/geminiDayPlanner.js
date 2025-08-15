@@ -1,126 +1,61 @@
 /**
  * =================================================================
- * Geminiデイプランナー (agents/geminiDayPlanner.js) - v1.2 プロンプト最終FIX版
+ * Day Planner用 詳細プラン生成AIエージェント (最終FIX版)
  * =================================================================
- * - 担当: Gemini
- * - 修正点:
- * - Geminiが意図した通りのマークダウンテーブル形式でタイムスケジュールを生成するように、
- * プロンプト（指示文）のルールをさらに厳格化し、AIの回答形式を安定させます。
- * - Few-shot learning（具体例の提示）を取り入れ、出力の精度を向上させました。
- * - 回答からテーブル部分のみを正規表現で安全に抽出するロジックを強化しました。
  */
+const { callGenerativeAi } = require('../utils');
 
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const functions = require("firebase-functions");
+async function generateDetailedDayPlan({ eventInfo, outboundRouteData, returnRouteData }) {
+    console.log("[Gemini Planner] プロンプトを生成し、Gemini APIを呼び出します...");
 
-// --- 初期化 ---
-const GEMINI_API_KEY = functions.config().gemini?.key;
-let genAI;
-if (GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-} else {
-    console.error("Gemini APIキーがfunctions.config()に設定されていません。");
-}
-
-/**
- * 複雑なナビゲーションデータを、Geminiが理解しやすいように要約・整形する関数
- * @param {object} data - 収集された全情報
- * @returns {string} プロンプトに埋め込むための整形済みJSON文字列
- */
-function formatDataForPrompt(data) {
-    // プロンプトに含める情報を厳選し、トークン量を削減しつつ品質を維持
-    const simplified = {
-        eventName: data.eventInfo.eventName,
-        eventAddress: data.eventInfo.eventAddress,
-        outbound: {
-            summary: data.outboundRouteData.navitimeRoute.raw_navitime_response.items[0].summary.move,
-            stationFacilities: data.outboundRouteData.stationFacilities
-        },
-        return: {
-            summary: data.returnRouteData.navitimeRoute.raw_navitime_response.items[0].summary.move,
-            stationFacilities: data.returnRouteData.stationFacilities
-        }
-    };
-    return JSON.stringify(simplified, null, 2);
-}
-
-/**
- * Geminiを呼び出し、1日の詳細なプランを生成する
- * @param {object} collectedData - これまでのステップで収集された全情報
- * @returns {Promise<object>} - イベント名、住所、そして生成されたスケジュールを含むオブジェクト
- */
-async function generateDetailedDayPlan(collectedData) {
-    if (!genAI) {
-        throw new Error("Gemini APIクライアントが初期化されていません。");
-    }
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
-
-    // --- ここからが修正されたプロンプト ---
     const prompt = `
-# Role
-あなたは、乳幼児を連れた家族のお出かけを専門とする、超一流のコンシェルジュです。
+# Role: 優秀な旅行コンシェルジュ & データアナリスト
+# Task: 提供された全ての情報を元に、家族向けの完璧な1日の行動計画をJSON形式で生成する。
 
-# Goal
-以下の入力情報を元に、移動、食事、休憩（おむつ替え、授乳）、イベント参加を具体的に盛り込んだ、最高の1日を過ごすための実践的なタイムスケジュールを生成してください。
+# Input Data:
+## 1. イベント基本情報:
+${JSON.stringify(eventInfo, null, 2)}
+## 2. Googleマップによる詳細な経路探索結果 (行き):
+// This object contains keys like 'duration', 'distance', 'summary', and 'details'.
+// The 'details' object has 'highways' and 'tolls'.
+${JSON.stringify(outboundRouteData.route, null, 2)}
 
-# Input Data
-\`\`\`json
-${formatDataForPrompt(collectedData)}
-\`\`\`
+# CRITICAL INSTRUCTIONS (絶対に遵守すること):
+1.  **出力は必ずJSON形式**とすること。
+2.  **"strategicGuide.logistics" フィールドの生成ルール (最重要):**
+    - **以下のステップに従って、提供された経路探索結果のデータだけを使い、文章を組み立てること。**
+    - **ステップ1 (所要時間):** \`duration\` の値を使い、「ご自宅から車で約[duration]です。」という文章から始める。
+    - **ステップ2 (道路種別):** \`details.highways\` の値を確認する。もし "一般道のみ" 以外であれば、「主に[highways]を利用します。」と続ける。
+    - **ステップ3 (料金):** \`details.tolls\` の値を確認する。もし \`null\` や "情報なし" 以外であれば、「高速料金は[tolls]です。」と続ける。
+    - **例:** 入力データが \`{"duration": "26分", "details": {"highways": "第三京浜道路", "tolls": "約800円"}}\` の場合、出力は「ご自宅から車で約26分です。主に第三京浜道路を利用します。高速料金は約800円です。」となる。
+    - **絶対に推測や創作をしてはならない。データがないステップは省略すること。**
+3.  **"map_polyline" フィールドの生成ルール:**
+    - 必ず、経路探索結果の \`map_polyline\` の文字列をそのままコピーして貼り付けること。
 
-# Constraints
-- **最重要**: 回答は、**必ず指定のマークダウンテーブル形式**で出力してください。
-- テーブルの前後に挨拶や説明文などの**余計なテキストは絶対に含めないでください**。
-- 回答は \`\`\`markdown で始まり、\`\`\` で終わるコードブロック形式にしてください。
-- 各施設の具体的な口コミ情報（例：「〇〇ビルの授乳室は綺麗で使いやすいと評判です」）を「アクティビティ」の項目に具体的に記述してください。
-- カテゴリは「移動 🚃」「電車 🚆」「休憩 🍼」「食事 🍴」「イベント ✨」「自宅 🏠」のいずれかを使用してください。
-- 開始時刻と終了時刻は、入力された移動時間や常識的な滞在時間を考慮して、現実的な値を設定してください。
+# JSON OUTPUT (この構造に厳密に従うこと):
+{
+  "planName": "恐竜たちに会いに行こう！みなとみらい大冒険",
+  "schedule": "| 開始時刻 | アクティビティ | 詳細 |\\n|:---|:---|:---|\\n| 09:00 | 出発準備 | 持ち物最終チェック！ |\\n...",
+  "strategicGuide": {
+      "whySpecial": "このプランは子供の好奇心を刺激する恐竜イベントを中心に、家族全員が楽しめるように設計されています。",
+      "logistics": "（上記CRITICAL INSTRUCTIONSに従って生成した、正確無比なアクセス情報）",
+      "packingList": "飲み物, おやつ, おむつ, 着替え, おもちゃ, ウェットティッシュ, 日焼け止め"
+  },
+  "alternativePlan": "もし雨が降ってしまった場合は、近くの屋内施設「カップヌードルミュージアム」や「アネビートリムパーク」で遊ぶのがおすすめです。",
+  "map_polyline": "..."
+}`;
 
-# Output Format Example
-\`\`\`markdown
-| 開始時刻 | 終了時刻 | カテゴリ | アクティビティ |
-|:---|:---|:---|:---|
-| 10:00 | 10:20 | 移動 🚃 | 自宅から最寄りのXX駅へ出発（徒歩約20分）。 |
-| 10:35 | 11:15 | 電車 🚆 | XX線でXX駅からYY駅へ移動。 |
-| 11:15 | 11:45 | 休憩 🍼 | YY駅直結の「YYデパート」3階のベビー休憩室でおむつ替え。口コミによると「午前中は比較的空いている」とのこと。 |
-| 11:45 | 12:00 | 移動 🚃 | YY駅からイベント会場へ移動（徒歩約15分）。 |
-| 12:00 | 15:00 | イベント ✨ | 「${collectedData.eventInfo.eventName}」を楽しむ。会場内の授乳室は2箇所。1階の授乳室は個室が3つあり、ミルク用のお湯も完備されています。 |
-| 15:00 | 16:00 | 食事 🍴 | 会場近くのカフェ「ベビーフレンドリーカフェ」で遅めのランチ。ベビーカー入店可能で、子供用椅子も豊富。 |
-| 16:00 | 16:30 | 休憩 🍼 | 帰りの電車に乗る前に、YY駅のベビー休憩室で再度おむつ替えと授乳。 |
-| 16:45 | 17:25 | 電車 🚆 | YY線でYY駅からXX駅へ。帰りは少し混むので、端の車両がおすすめ。 |
-| 17:25 | 17:45 | 移動 🚃 | XX駅から自宅へ。 |
-| 17:45 | - | 自宅 🏠 | お疲れ様でした！ |
-\`\`\`
-`;
-
-    try {
-        console.log("[Gemini Planner] プロンプトを生成し、Gemini APIを呼び出します...");
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text();
-        
-        // ★★★ 修正点: Geminiの回答からマークダウンテーブル部分だけを安全に抽出 ★★★
-        const tableMatch = responseText.match(/```markdown\s*([\s\S]*?)\s*```/);
-        
-        if (!tableMatch || !tableMatch[1]) {
-            console.error("[Gemini Planner ERROR] Geminiの回答からマークダウンテーブルを抽出できませんでした。Raw Response:", responseText);
-            throw new Error("Geminiが期待された形式でスケジュールを生成しませんでした。");
-        }
-        
-        const extractedTable = tableMatch[1].trim();
-        console.log("[Gemini Planner] スケジュールの生成と抽出に成功しました。");
-
-        return {
-            eventName: collectedData.eventInfo.eventName,
-            eventAddress: collectedData.eventInfo.eventAddress,
-            schedule: extractedTable, // 抽出したテーブル部分だけを返す
-        };
-
-    } catch (error) {
-        console.error("[Gemini Planner FATAL] Gemini APIの呼び出し中に致命的なエラーが発生しました:", error);
-        throw new Error(`Gemini APIの呼び出しに失敗しました: ${error.message}`);
+    const finalPlan = await callGenerativeAi(prompt, true, "gemini-1.5-pro-latest");
+    
+    if (finalPlan) {
+      console.log("[Gemini Planner] 超高精度プランの生成に成功しました。");
+      finalPlan.startLocation = outboundRouteData.route?.raw_google_response?.routes?.[0]?.legs?.[0]?.start_location;
+      finalPlan.endLocation = outboundRouteData.route?.raw_google_response?.routes?.[0]?.legs?.[0]?.end_location;
+    } else {
+      console.error("[Gemini Planner] 超高精度プランの生成に失敗しました。");
     }
+    
+    return finalPlan;
 }
 
-module.exports = {
-    generateDetailedDayPlan
-};
+module.exports = { generateDetailedDayPlan };
