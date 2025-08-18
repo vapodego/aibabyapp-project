@@ -4,26 +4,17 @@
  * =================================================================
  */
 
-const fetch = require('node-fetch');
+// const fetch = require('node-fetch');
 // ★★★ 共有ユーティリティから、リトライ機能付きのAI呼び出し関数を読み込む
 const { callGenerativeAi } = require('../utils');
+const { toolGetHtmlContent } = require('../utils/weeklyPlannerUtils');
 
 async function extractEventInfoFromUrl(url) {
     console.log(`[Extractor Agent] URLの処理を開始します: ${url}`);
     try {
-        const response = await fetch(url, {
-            timeout: 10000, redirect: 'follow',
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
-        });
-
-        if (!response.ok) {
-            console.error(`[Extractor Agent] URLの取得に失敗しました。`);
-            return null;
-        }
-
-        const html = await response.text();
-        if (!html || html.trim().length < 100) {
-            console.error("[Extractor Agent] 取得したHTMLが短すぎるため、処理を中断します。");
+        const html = await toolGetHtmlContent(url, { minLength: 100 });
+        if (!html) {
+            console.error("[Extractor Agent] HTMLが取得できない/短すぎるため、処理を中断します。");
             return null;
         }
         

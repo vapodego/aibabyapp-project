@@ -10,7 +10,11 @@
 
 const { callGenerativeAi, toolGetHtmlContent } = require('../utils');
 const pLimit = require('p-limit');
-const limit = pLimit(2);
+const limitFetch = pLimit(1);   // HTML取得は外向きスパイクを防ぐため1
+const limitLite  = pLimit(3);   // 軽い判定・整形は2〜3
+const limitLLM   = pLimit(2);   // LLM呼び出しは2（必要に応じて調整）
+
+const DEEPDIVE_BUDGET_MS = 90_000;
 
 async function agentGeographer(location) {
     const prompt = `
@@ -86,10 +90,18 @@ ${htmlContent.substring(0, 15000)}
 }
 
 async function agentListPageAnalyzer(urls) {
-    const htmlContents = await Promise.all(
-        urls.map((url) => limit(async () => ({ url, html: await toolGetHtmlContent(url) })))
+    const htmlSettled = await Promise.allSettled(
+      urls.map((url) => limitFetch(async () => {
+        const html = await toolGetHtmlContent(url);
+        return { url, html };
+      }))
     );
-    const validContents = htmlContents.filter(c => c.html);
+    const validContents = htmlSettled
+      .filter(s => s.status === 'fulfilled' && s.value && s.value.html)
+      .map(s => s.value);
+
+    // タイムボックス: 取得＋解析で時間超過している場合はここで早期終了
+    // （validContentsが空ならそのまま返す）
     if (validContents.length === 0) return { candidates: [] };
     
     const prompt = `

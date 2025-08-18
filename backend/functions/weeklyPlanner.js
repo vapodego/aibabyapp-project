@@ -10,18 +10,21 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const pLimit = require("p-limit");
-const limit = pLimit(2);
+// 段階別の並列度
+const limitFetch = pLimit(1);   // HTML取得は外向きスパイクを防ぐため1
+const limitLite  = pLimit(3);   // 軽い判定・整形は2〜3
+const limitLLM   = pLimit(2);   // LLM呼び出しは2（必要に応じて調整）
 
 const agents = require("./agents/weeklyPlannerAgents");
 const weeklyUtils = require("./utils/weeklyPlannerUtils");
-const { toolGetHtmlContent } = require("./utils");
+const { toolGetHtmlContent } = require("./utils/weeklyPlannerUtils");
 
 // =================================================================
 // 手動実行用の関数 (ローカル検証)
 // =================================================================
 exports.runWeeklyPlansManually = functions
   .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 540, memory: "2GB" })
+  .runWith({ timeoutSeconds: 540, memory: "2GB", secrets: ["GOOGLE_API_KEY", "GOOGLE_CSE_ID"] })
   .https.onRequest(async (req, res) => {
     console.log("【ローカル実行】runWeeklyPlansManually関数がトリガーされました。");
 
@@ -81,7 +84,7 @@ exports.runWeeklyPlansManually = functions
 // =================================================================
 exports.generatePlansOnCall = functions
   .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 540, memory: "2GB" })
+  .runWith({ timeoutSeconds: 540, memory: "2GB", secrets: ["GOOGLE_API_KEY", "GOOGLE_CSE_ID"] })
   .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError("unauthenticated", "認証が必要です。");
@@ -139,23 +142,57 @@ async function generatePlansForUser(userId, userData) {
   const userInterests = userData.interests || [];
   let allSearchResults = [];
   if (Array.isArray(userInterests) && userInterests.length > 0) {
-    console.log(`--- ユーザーの興味 (${userInterests.join(", ")}) に基づいて個別検索を開始 ---`);
+    console.log(`[SEARCH] will start for interests:`, userInterests);
     const searchPromises = userInterests.map((interest) =>
-      limit(async () => {
+      limitLLM(() => (async () => {
+        console.log(`[SEARCH] preparing query for interest: ${interest}`);
         const searchQueryGenResult = await agents.agentBroadEventSearcher(searchArea, interest);
         console.log(`--- agentBroadEventSearcherの結果 (興味: ${interest}) ---`, JSON.stringify(searchQueryGenResult, null, 2));
-        if (!searchQueryGenResult || !searchQueryGenResult.query) return [];
-        return weeklyUtils.toolGoogleSearch(searchQueryGenResult.query);
-      })
+
+        const q = searchQueryGenResult && searchQueryGenResult.query;
+        if (!q) {
+          console.warn(`[SEARCH] query missing for interest="${interest}" → skip`);
+          return [];
+        }
+
+        // 呼び出し直前で必ずログする（ここまで到達していることを可視化）
+        console.log(`> [Google検索実行] クエリ: ${q}`);
+        try {
+          const links = await weeklyUtils.toolGoogleSearch(q);
+          const len = Array.isArray(links) ? links.length : 0;
+          console.log(`[SEARCH] got ${len} links for interest="${interest}"`);
+          return links || [];
+        } catch (e) {
+          console.error(`[SEARCH] toolGoogleSearch failed for interest="${interest}":`, e && e.message ? e.message : e);
+          return [];
+        }
+      })())
     );
-    const resultsPerInterest = await Promise.all(searchPromises);
-    allSearchResults = resultsPerInterest.flat();
+
+    const resultsPerInterest = await Promise.allSettled(searchPromises);
+    console.log(`[SEARCH] allSettled statuses:`, resultsPerInterest.map(s => s.status));
+
+    const resultsPerInterestOk = resultsPerInterest
+      .filter(s => s.status === 'fulfilled')
+      .map(s => s.value || []);
+
+    allSearchResults = resultsPerInterestOk.flat();
+    console.log(`[SEARCH] merged results count: ${allSearchResults.length}`);
   } else {
     console.log(`--- ユーザーの興味が未設定のため、広域検索を実行 ---`);
     const searchQueryGenResult = await agents.agentBroadEventSearcher(searchArea, null);
     console.log(`--- agentBroadEventSearcherの結果 (広域検索) ---`, JSON.stringify(searchQueryGenResult, null, 2));
-    if (searchQueryGenResult && searchQueryGenResult.query) {
-      allSearchResults = await weeklyUtils.toolGoogleSearch(searchQueryGenResult.query);
+    const q = searchQueryGenResult && searchQueryGenResult.query;
+    if (q) {
+      console.log(`> [Google検索実行] クエリ: ${q}`);
+      try {
+        allSearchResults = await weeklyUtils.toolGoogleSearch(q);
+        const len = Array.isArray(allSearchResults) ? allSearchResults.length : 0;
+        console.log(`[SEARCH] got ${len} links (broad search)`);
+      } catch (e) {
+        console.error(`[SEARCH] toolGoogleSearch failed (broad search):`, e && e.message ? e.message : e);
+        allSearchResults = [];
+      }
     }
   }
 
@@ -164,23 +201,29 @@ async function generatePlansForUser(userId, userData) {
     return { finalPlans: [], allCandidateUrls: [] };
   }
 
-  const uniqueUrls = [...new Set(allSearchResults.map((r) => r.url))];
+  const uniqueUrls = [...new Set(
+    (allSearchResults || [])
+      .map((r) => (typeof r === 'string' ? r : (r && r.url)))
+      .filter(Boolean)
+  )];
   console.log(`> 合計${allSearchResults.length}件から重複を除いた${uniqueUrls.length}件のURLを取得`);
+  console.log(`[SEARCH] unique URL list size: ${uniqueUrls.length}`);
 
   const initialUrls = uniqueUrls;
   const allEvaluatedUrls = new Set(initialUrls);
   const targetDateRange = userData.dateRange ? `${userData.dateRange.start} to ${userData.dateRange.end}` : null;
 
   console.log("--- 鑑定と深掘り ---");
-  const inspectionPromises = initialUrls.map((url) =>
-    limit(async () => {
-      const htmlContent = await toolGetHtmlContent(url);
-      if (!htmlContent) return null;
-      const inspectionResult = await agents.agentInspector(url, htmlContent, userData, targetDateRange);
-      return { url, result: inspectionResult };
-    })
-  );
-  const inspectionResults = (await Promise.all(inspectionPromises)).filter(Boolean);
+  const inspectionPromises = initialUrls.map((url) => (async () => {
+    const htmlContent = await limitFetch(() => toolGetHtmlContent(url));
+    if (!htmlContent) return null;
+    const inspectionResult = await limitLLM(() => agents.agentInspector(url, htmlContent, userData, targetDateRange));
+    return { url, result: inspectionResult };
+  })());
+  const inspectionSettled = await Promise.allSettled(inspectionPromises);
+  const inspectionResults = inspectionSettled
+    .filter(s => s.status === 'fulfilled' && s.value)
+    .map(s => s.value);
 
   let validCandidates = inspectionResults
     .filter((item) => item.result?.isValid && item.result.isMatch)
@@ -192,14 +235,15 @@ async function generatePlansForUser(userId, userData) {
   // リストページ深掘り
   if (listPageUrls.length > 0) {
     console.log(`--- リストページの深掘り (${listPageUrls.length}件) ---`);
-    const deepDiveUrlPromises = listPageUrls.map((url) =>
-      limit(async () => {
-        const html = await toolGetHtmlContent(url);
-        if (!html) return [];
-        return weeklyUtils.toolExtractEventUrls(html, url);
-      })
-    );
-    const nestedUrlsArray = await Promise.all(deepDiveUrlPromises);
+    const deepDiveUrlPromises = listPageUrls.map((url) => (async () => {
+      const html = await limitFetch(() => toolGetHtmlContent(url));
+      if (!html) return [];
+      return weeklyUtils.toolExtractEventUrls(html, url);
+    })());
+    const nestedUrlsSettled = await Promise.allSettled(deepDiveUrlPromises);
+    const nestedUrlsArray = nestedUrlsSettled
+      .filter(s => s.status === 'fulfilled')
+      .map(s => s.value);
     const extractedUrls = nestedUrlsArray.flat();
     const newUrlsToInspect = [...new Set(extractedUrls)].filter((url) => !allEvaluatedUrls.has(url));
 
@@ -207,19 +251,20 @@ async function generatePlansForUser(userId, userData) {
       newUrlsToInspect.forEach((url) => allEvaluatedUrls.add(url));
       console.log(`> リストページから${newUrlsToInspect.length}件の新しいURLを発見。再鑑定します。`);
 
-      const deepDivePromises = newUrlsToInspect.map((url) =>
-        limit(async () => {
-          if (!url) return null;
-          const htmlContent = await toolGetHtmlContent(url);
-          if (!htmlContent) return null;
-          const inspectionResult = await agents.agentInspector(url, htmlContent, userData, targetDateRange);
-          if (inspectionResult && inspectionResult.isValid && inspectionResult.isMatch) {
-            return { ...inspectionResult, url };
-          }
-          return null;
-        })
-      );
-      const deepDiveResults = (await Promise.all(deepDivePromises)).filter(Boolean);
+      const deepDivePromises = newUrlsToInspect.map((url) => (async () => {
+        if (!url) return null;
+        const htmlContent = await limitFetch(() => toolGetHtmlContent(url));
+        if (!htmlContent) return null;
+        const inspectionResult = await limitLLM(() => agents.agentInspector(url, htmlContent, userData, targetDateRange));
+        if (inspectionResult && inspectionResult.isValid && inspectionResult.isMatch) {
+          return { ...inspectionResult, url };
+        }
+        return null;
+      })());
+      const deepDiveSettled = await Promise.allSettled(deepDivePromises);
+      const deepDiveResults = deepDiveSettled
+        .filter(s => s.status === 'fulfilled' && s.value)
+        .map(s => s.value);
       validCandidates.push(...deepDiveResults);
       console.log(`> 深掘り後の合計有効候補数: ${validCandidates.length}件`);
     } else {
@@ -243,10 +288,10 @@ async function generatePlansForUser(userId, userData) {
   const finalPlans = await agents.agentFinalPlanner(finalCandidates, userData);
 
   // 画像URL補完（og:image → 最初の<img> → Google画像検索）
-  const patchedPlans = await Promise.all((finalPlans || []).map(plan => limit(async () => {
+  const patchedPlans = await Promise.allSettled((finalPlans || []).map(plan => (async () => {
     if (!plan || plan.imageUrl || !plan.url) return plan;
     try {
-      const html = await toolGetHtmlContent(plan.url);
+      const html = await limitFetch(() => toolGetHtmlContent(plan.url));
       if (html) {
         const imgs = weeklyUtils.parseImagesFromHtml(plan.url, html);
         const picked = imgs.og_image || (imgs.image_list && imgs.image_list[0] && imgs.image_list[0].src) || null;
@@ -256,16 +301,18 @@ async function generatePlansForUser(userId, userData) {
         }
       }
     } catch (_) { /* ベストエフォート */ }
-    // フォールバック: 簡易画像検索
     try {
       const q = `${plan.location?.name || ''} ${plan.eventName}`.trim();
       const fallback = await weeklyUtils.toolGoogleImageSearch(q);
       if (fallback) plan.imageUrl = fallback;
     } catch (_) { /* ignore */ }
     return plan;
-  })));
+  })()));
+  const patchedPlansOk = patchedPlans
+    .filter(s => s.status === 'fulfilled')
+    .map(s => s.value);
 
-  return { finalPlans: patchedPlans, categorizedAlternatives: null, allCandidateUrls: allUrlsArray };
+  return { finalPlans: patchedPlansOk, categorizedAlternatives: null, allCandidateUrls: allUrlsArray };
 }
 
 // =================================================================

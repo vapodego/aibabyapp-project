@@ -24,34 +24,56 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
         return null;
     }
 
+    // フェンス除去ヘルパ
+    const stripFences = (s) => {
+        if (!s) return s;
+        return s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    };
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             const model = genAI.getGenerativeModel({
                 model: modelName,
                 generationConfig: {
-                    temperature: 0.0,
+                    temperature: expectJson ? 0.2 : 0.0,
                     responseMimeType: expectJson ? "application/json" : "text/plain",
                 }
             });
-            
+
             console.log(`[Gemini] API呼び出し試行 #${attempt} (モデル: ${modelName})...`);
             const result = await model.generateContent(prompt);
-            const responseText = result.response.text();
+            const responseTextRaw = result?.response?.text?.() ?? '';
+            const responseText = stripFences(responseTextRaw);
 
-            if (expectJson) {
-                const match = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-                const jsonString = match ? match[1] : responseText;
-                return JSON.parse(jsonString);
-            }
-            return responseText.trim();
+            if (!expectJson) return (responseText || '').trim();
 
-        } catch (e) {
-            if (e.message && (e.message.includes('503') || e.message.toLowerCase().includes('overloaded'))) {
-                if (attempt < maxRetries) {
-                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-                    console.warn(`[Gemini] モデルが過負荷です。${(delay / 1000).toFixed(1)}秒後に再試行します...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
+            // 第1パース
+            try {
+                return JSON.parse(responseText);
+            } catch (e1) {
+                console.warn(`[Gemini] JSON parse失敗(1st) → 修復パスへ: ${e1.message}`);
+                // 第2パス: JSON修復をLLMに依頼
+                const fixer = genAI.getGenerativeModel({
+                    model: modelName.includes('pro') ? modelName : 'gemini-1.5-pro-latest',
+                    generationConfig: { responseMimeType: 'application/json', temperature: 0 }
+                });
+                const fixPrompt = `次の文字列を有効なJSONに修復して、JSONデータのみを返してください。\n${responseText}`;
+                const fixedRes = await fixer.generateContent(fixPrompt);
+                const fixedText = stripFences(fixedRes?.response?.text?.() ?? '');
+                try {
+                    return JSON.parse(fixedText);
+                } catch (e2) {
+                    console.error(`[Gemini] JSON parse失敗(2nd): ${e2.message}`);
+                    // ここでリトライ継続
                 }
+            }
+        } catch (e) {
+            const transient = e.message && (e.message.includes('503') || e.message.toLowerCase().includes('overloaded'));
+            if (transient && attempt < maxRetries) {
+                const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                console.warn(`[Gemini] 過負荷/一時エラー。${(delay / 1000).toFixed(1)}秒後に再試行...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
             } else {
                 console.error(`[Gemini] 回復不能なエラー:`, e);
                 return null;
@@ -63,28 +85,82 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
 }
 
 /**
- * URLからHTMLコンテンツを取得するツール (SSL証明書エラー対応版)
+ * HTML取得で除外するドメインセット
  */
-async function toolGetHtmlContent(url) {
-    // ★★★ SSL証明書エラーを回避するためのエージェントを定義 ★★★
-    const httpsAgent = new https.Agent({
-        rejectUnauthorized: false,
-    });
+const EXCLUDED_DOMAINS = new Set([
+    "note.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "youtube.com",
+    "tiktok.com",
+    "pinterest.com",
+    "amazon.co.jp",
+    "amazon.com",
+    "rakuten.co.jp",
+    "rakuten.com",
+    "yahoo.co.jp",
+    "yahoo.com",
+    // 必要に応じて追加
+]);
 
+/**
+ * 指定URLが除外ドメインに該当するか判定
+ */
+function isExcluded(url) {
     try {
-        const response = await fetch(url, {
-            timeout: 10000, 
-            redirect: 'follow',
-            agent: httpsAgent, // ★★★ エージェントを適用 ★★★
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
-        });
-        if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) return null;
-        return await response.text();
-    } catch (error) {
-        // エラーログはエラーハンドリングを改善するために、エラーオブジェクト全体を出力
-        console.error(`> HTML取得ツールエラー (URL: ${url}):`, error);
+        const { hostname } = new URL(url);
+        // サブドメインも含めて判定
+        return [...EXCLUDED_DOMAINS].some(domain => hostname === domain || hostname.endsWith('.' + domain));
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * URLからHTMLコンテンツを取得するツール (SSL証明書エラー対応版, AbortController, リトライ付き, 除外ドメイン対応)
+ */
+async function toolGetHtmlContent(url, { minLength = 100, maxBytes = 2 * 1024 * 1024 } = {}) {
+    if (isExcluded(url)) {
+        console.warn(`[toolGetHtmlContent] 除外ドメインのためスキップ: ${url}`);
         return null;
     }
+    const httpsAgent = new https.Agent({ rejectUnauthorized: false, keepAlive: false });
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7'
+    };
+
+    const timeouts = [6000, 7500];
+
+    for (let attempt = 0; attempt < timeouts.length; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeouts[attempt]);
+        try {
+            const response = await fetch(url, { redirect: 'follow', agent: httpsAgent, headers, signal: controller.signal });
+            clearTimeout(timeoutId);
+            const ct = response.headers.get('content-type') || '';
+            const cl = parseInt(response.headers.get('content-length') || '0', 10);
+            if (!response.ok) return null;
+            if (!/text\/html/i.test(ct)) return null;
+            if (cl && cl > maxBytes) { console.warn(`[toolGetHtmlContent] content-length too large: ${cl} > ${maxBytes}`); return null; }
+            const text = await response.text();
+            if (!text || text.trim().length < minLength) return null;
+            return text;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            const isTimeout = error.name === 'AbortError' || /timeout/i.test(error.message);
+            if (attempt === 0 && isTimeout) {
+                await new Promise(res => setTimeout(res, 400));
+                continue; // 2回目へ
+            }
+            console.error(`> HTML取得ツールエラー (URL: ${url}, 試行${attempt + 1}):`, error?.type || error?.message || String(error));
+            return null;
+        }
+    }
+    return null;
 }
 
 
@@ -114,4 +190,6 @@ module.exports = {
     toolGetHtmlContent,
     getGeocodedLocation,
     getWeatherDescription,
+    isExcluded,
+    EXCLUDED_DOMAINS,
 };

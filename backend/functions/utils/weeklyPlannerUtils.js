@@ -12,8 +12,72 @@ const { JSDOM } = require('jsdom');
 const { FieldValue } = require("firebase-admin/firestore");
 const cheerio = require('cheerio');
 
-const GOOGLE_API_KEY = functions.config().google?.key;
-const GOOGLE_CX = functions.config().google?.cx;
+// --- HTML取得の共通設定（短タイムアウト + 1リトライ / UA/言語ヘッダ / 除外ドメイン） ---
+const EXCLUDED_DOMAINS = new Set([
+  'www.instagram.com', 'instagram.com',
+  // 必要に応じて追加: 'iko-yo.net',
+]);
+
+function isExcludedDomain(url) {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return EXCLUDED_DOMAINS.has(h);
+  } catch (_) { return false; }
+}
+
+async function fetchWithAbort(url, { timeoutMs = 6000, headers = {}, redirect = 'follow', agent } = {}) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127 Safari/537.36',
+        'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+        ...headers,
+      },
+      agent,
+    });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/**
+ * HTMLを取得（5–6秒 + 1リトライ, UA/言語ヘッダ, 除外ドメインスキップ）
+ */
+async function toolGetHtmlContent(url, { minLength = 100 } = {}) {
+  if (!url) return null;
+  if (isExcludedDomain(url)) {
+    console.warn(`[HTML] excluded domain skip: ${url}`);
+    return null;
+  }
+
+  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+  const agent = isEmulator ? undefined : new https.Agent({ keepAlive: false });
+
+  // 1st try
+  try {
+    const res = await fetchWithAbort(url, { timeoutMs: 6000, agent });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return (text && text.trim().length >= minLength) ? text : null;
+  } catch (e1) {
+    // 2nd try with small backoff and slightly longer timeout
+    await new Promise(r => setTimeout(r, 400));
+    try {
+      const res2 = await fetchWithAbort(url, { timeoutMs: 7500, agent });
+      if (!res2.ok) return null;
+      const text2 = await res2.text();
+      return (text2 && text2.trim().length >= minLength) ? text2 : null;
+    } catch (e2) {
+      console.error(`> HTML取得ツールエラー (URL: ${url}):`, e2.type || e2.message || String(e2));
+      return null;
+    }
+  }
+}
 
 /**
  * Google Custom Search API を使ってWeb検索を実行
@@ -234,4 +298,5 @@ module.exports = {
   savePlansToFirestore,
   generateHtmlResponse,
   toolExtractEventUrls,
+  toolGetHtmlContent,
 };
