@@ -1,7 +1,6 @@
 const functions = require("firebase-functions");
-const fetch = require('node-fetch');
 
-const GOOGLE_API_KEY = functions.config().google?.key;
+const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
 
 /**
  * 住所から緯度経度を取得するジオコーディング関数
@@ -13,7 +12,15 @@ async function getGeocodedLocation(address) {
         console.warn("[GEOCODER] 住所が空のため、ジオコーディングをスキップします。");
         return null;
     }
+    
+    // ▼▼▼【ここを修正】APIキーの読み込みを、ファイル冒頭から関数内に移動 ▼▼▼
+    const GOOGLE_API_KEY = functions.config().google?.key;
+
     if (!GOOGLE_API_KEY) {
+        if (isEmulator) {
+            console.warn("[GEOCODER] ローカル環境でGoogle APIキーが設定されていません。ジオコーディングをスキップし、nullを返します。");
+            return null;
+        }
         console.error("[GEOCODER] Google APIキーが設定されていません。");
         return null;
     }

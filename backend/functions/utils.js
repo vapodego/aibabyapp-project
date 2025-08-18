@@ -1,11 +1,12 @@
 /**
  * =================================================================
- * Day Planner用 ユーティリティ関数群 (最終版)
+ * Day Planner用 ユーティリティ関数群 (エラー修正版)
  * =================================================================
  */
 
 const functions = require("firebase-functions");
 const fetch = require('node-fetch');
+const https = require('https'); // ★★★ httpsモジュールをインポート
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const GEMINI_API_KEY = functions.config().gemini?.key;
@@ -26,7 +27,7 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             const model = genAI.getGenerativeModel({
-                model: modelName, // ★★★ モデル名を引数で指定できるように変更
+                model: modelName,
                 generationConfig: {
                     temperature: 0.0,
                     responseMimeType: expectJson ? "application/json" : "text/plain",
@@ -53,7 +54,7 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
                 }
             } else {
                 console.error(`[Gemini] 回復不能なエラー:`, e);
-                return null; // リトライ対象外のエラーなら即終了
+                return null;
             }
         }
     }
@@ -61,19 +62,31 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
     return null;
 }
 
+/**
+ * URLからHTMLコンテンツを取得するツール (SSL証明書エラー対応版)
+ */
 async function toolGetHtmlContent(url) {
+    // ★★★ SSL証明書エラーを回避するためのエージェントを定義 ★★★
+    const httpsAgent = new https.Agent({
+        rejectUnauthorized: false,
+    });
+
     try {
         const response = await fetch(url, {
-            timeout: 10000, redirect: 'follow',
+            timeout: 10000, 
+            redirect: 'follow',
+            agent: httpsAgent, // ★★★ エージェントを適用 ★★★
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36' }
         });
         if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) return null;
         return await response.text();
     } catch (error) {
+        // エラーログはエラーハンドリングを改善するために、エラーオブジェクト全体を出力
         console.error(`> HTML取得ツールエラー (URL: ${url}):`, error);
         return null;
     }
 }
+
 
 async function getGeocodedLocation(address) {
   if (!address) return null;

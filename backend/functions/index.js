@@ -1,44 +1,28 @@
 /**
  * =================================================================
- * Cloud Functions エントリポイント (index.js)
+ * index.js - 全てのCloud Functionsの司令塔 (最終修正版)
  * =================================================================
+ * - 役割1: Firebase Admin SDKを最初に一度だけ初期化
+ * - 役割2: 各ファイルの関数を集約してエクスポート
  */
 
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+admin.initializeApp();
 
-// アプリケーションの初期化を一度だけ実行
-if (admin.apps.length === 0) {
-  admin.initializeApp();
-}
-
-// --- Day Planner ---
-// ファイル分割に対応し、dayPlanner.jsから関数を読み込む
-const dayPlanner = require("./dayPlanner");
-exports.runDayPlannerManually = dayPlanner.runDayPlannerManually;
-exports.planDayFromUrl = dayPlanner.planDayFromUrl;
-
-
-// --- 既存の他機能 (変更なし) ---
+// 各機能モジュールを読み込み
 const weeklyPlanner = require("./weeklyPlanner");
+const dayPlanner = require("./dayPlanner");
 const testNotificationHandler = require("./sendTestNotification");
 
-// 週次プランナー
-exports.runWeeklyPlansManually   = weeklyPlanner.runWeeklyPlansManually;
-exports.runWeeklyPlansV2Manually = require("./WeeklyPlanner_v2").runWeeklyPlansV2Manually;
-exports.runWeeklyPlansA1Manually = require("./weeklyPlanner_a1").runWeeklyPlansA1Manually;
-exports.runWeeklyPlansA2Manually = require("./weeklyPlanner_a2").runWeeklyPlansA2Manually;
+// Weekly Planner
+exports.runWeeklyPlansManually = weeklyPlanner.runWeeklyPlansManually;
+exports.generatePlansOnCall   = weeklyPlanner.generatePlansOnCall;
+exports.previewWeeklyPlans    = weeklyPlanner.previewWeeklyPlans;
+exports.getPlanStatus         = weeklyPlanner.getPlanStatus;
 
-// 非同期ジョブ
-exports.weeklyPlansJob     = require("./weeklyPlanner_async").weeklyPlansJob;
-exports.onPlannerJobCreate = require("./weeklyPlanner_async").onPlannerJobCreate;
+// Day Planner
+exports.runDayPlannerManually = dayPlanner.runDayPlannerManually;
+exports.planDayFromUrl        = dayPlanner.planDayFromUrl;
 
-// アプリからの呼び出し
-exports.generatePlansOnCall = weeklyPlanner.generatePlansOnCall;
-
-// 通知
-exports.sendTestNotification = testNotificationHandler.sendTestNotification;
-
-// agentMode がある場合は必要に応じて有効化
-// const agentMode = require('./agentMode');
-// exports.agentNotificationTrigger = agentMode.agentNotificationTrigger;
+// Notifications
+exports.sendTestNotification  = testNotificationHandler.sendTestNotification;

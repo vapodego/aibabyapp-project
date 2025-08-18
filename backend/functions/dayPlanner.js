@@ -21,7 +21,7 @@ exports.runDayPlannerManually = functions
   .https.onRequest(async (req, res) => {
     console.log("【Day Planner 手動実行】を開始します。");
     
-    const testEventUrl = "https://bo-sai.city.yokohama.lg.jp/news/archives/118";
+    const testEventUrl = "https://www.welcome.city.yokohama.jp/eventinfo/ev_detail.php?bid=yw12492";
     const testOriginAddress = "横浜市都筑区牛久保西3-10-62";
 
     try {

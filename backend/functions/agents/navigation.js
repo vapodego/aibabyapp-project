@@ -1,23 +1,20 @@
 /**
  * =================================================================
- * ナビゲーション・エージェント (agents/navigation.js) - v2.2 保守性向上版
+ * ナビゲーション・エージェント (agents/navigation.js) - v2.4 最終修正版
  * =================================================================
- * - 担当: Gemini
- * - 修正点: ユーザーの指摘に基づき、将来的な機能復活を容易にするため、
- * 公共交通機関関連のロジックを削除するのではなく、コメントアウトに変更。
+ * - 修正点: APIキーの読み込みをファイル冒頭から関数内に移動し、初期化エラーを完全に防止。
  */
 
 const functions = require("firebase-functions");
-const fetch = require('node-fetch');
 const { getGeocodedLocation } = require('../utils/geocoder');
-
-const GOOGLE_API_KEY = functions.config().google?.key;
-const RAPIDAPI_KEY = functions.config().rapidapi?.key;
 
 /**
  * Google Maps Directions APIを使い、詳細な車ルートを取得する
  */
 async function getCarRoute(startLatLon, endLatLon) {
+  // ▼▼▼【ここを修正】APIキーの読み込みを、ファイル冒頭から関数内に移動 ▼▼▼
+  const GOOGLE_API_KEY = functions.config().google?.key;
+
   if (!GOOGLE_API_KEY) {
     console.error("Google APIキーが設定されていません。");
     return null;
@@ -60,57 +57,10 @@ async function getCarRoute(startLatLon, endLatLon) {
   }
 }
 
-/*
-// =================================================================
-// ▼▼▼【ここから下は、将来復活させる公共交通機関のロジックです】▼▼▼
-// =================================================================
-
-async function getTransitRoute(startLatLon, endLatLon, startTime = new Date()) {
-    if (!RAPIDAPI_KEY) {
-        console.error("RapidAPIキーが設定されていません。");
-        return null;
-    }
-    const [startLat, startLon] = startLatLon.split(',');
-    const [endLat, endLon] = endLatLon.split(',');
-
-    const url = new URL('https://navitime-route-totalnavi.p.rapidapi.com/route_transit');
-    const params = {
-        start: `${startLat},${startLon}`,
-        goal: `${endLat},${endLon}`,
-        start_time: startTime.toISOString().slice(0, 16).replace('T', ' '),
-        results: '1',
-        sort: 'time',
-    };
-    url.search = new URLSearchParams(params).toString();
-
-    console.log(`[NAVITIME API] Requesting URL: ${url.href}`);
-    
-    const response = await fetch(url.href, {
-        method: 'GET',
-        headers: {
-            'X-RapidAPI-Key': RAPIDAPI_KEY,
-            'X-RapidAPI-Host': 'navitime-route-totalnavi.p.rapidapi.com'
-        }
-    });
-
-    if (!response.ok) {
-        console.error(`Navitime API Error: ${response.status} ${response.statusText}`);
-        return null;
-    }
-    const data = await response.json();
-    return data;
-}
-
-// =================================================================
-// ▲▲▲【ここまでが、将来復活させる公共交通機関のロジックです】▲▲▲
-// =================================================================
-*/
-
-
 /**
  * ナビゲーション計画のメイン関数
  */
-exports.agentNavigationPlanning = async (origin, destination, mode = 'transit') => {
+exports.agentNavigationPlanning = async (origin, destination, mode = 'car') => {
   console.log(`[AGENT] ナビゲーションエージェントが起動しました。モード: ${mode}`);
   
   const startCoords = await getGeocodedLocation(origin);
@@ -124,20 +74,12 @@ exports.agentNavigationPlanning = async (origin, destination, mode = 'transit') 
       throw new Error(`ジオコーディングに失敗`);
   }
   
-  let routeData = null;
-  if (mode === 'car') {
-    console.log('[AGENT] 車ルートを検索します...');
-    routeData = await getCarRoute(`${startCoords.lat},${startCoords.lng}`, `${endCoords.lat},${endCoords.lng}`);
-  } else {
-    // 公共交通機関のロジックは現在無効化されています
-    console.log('[AGENT] 公共交通機関ルートを検索します... (現在無効化中)');
-    // routeData = await getTransitRoute(`${startCoords.lat},${startCoords.lng}`, `${endCoords.lat},${endCoords.lng}`);
-    routeData = { route_type: 'transit', summary: '公共交通機関での移動（現在無効化中）' };
-  }
+  console.log('[AGENT] 車ルートを検索します...');
+  const routeData = await getCarRoute(`${startCoords.lat},${startCoords.lng}`, `${endCoords.lat},${endCoords.lng}`);
   
   console.log('[AGENT] ナビゲーションエージェントの処理が正常に完了しました。');
   return {
-    mode: mode,
+    mode: 'car',
     route: routeData,
   };
 };

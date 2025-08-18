@@ -3,7 +3,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'; // ◀◀◀ 追加
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import React, { useEffect, useState, useRef } from 'react';
 import { Text, View, Platform, Alert, StatusBar as RNStatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,7 @@ import ChatScreen from './screens/ChatScreen';
 import PlanScreen from './screens/PlanScreen';
 import SuggestedPlansScreen from './screens/SuggestedPlansScreen';
 import DayPlanScreen from './screens/DayPlanScreen'; 
+import SettingsScreen from './screens/SettingsScreen'; // ◀◀◀ 本物の設定画面をインポート
 
 // Utilities & Firebase
 import { loadInitialRecords } from './utils/loadInitialRecords';
@@ -27,7 +28,7 @@ import { API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, 
 
 // --- Navigatorのインスタンスを作成 ---
 const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator(); // ◀◀◀ タブ用のインスタンスを追加
+const Tab = createBottomTabNavigator();
 
 // --- Firebase Config (変更なし) ---
 const firebaseConfig = {
@@ -49,16 +50,17 @@ Notifications.setNotificationHandler({
 // --- Push Token Helper Function (変更なし) ---
 async function registerForPushNotificationsAsync() { /* ... */ }
 
-// ▼▼▼【ここからが大きな変更点】▼▼▼
-
 // --- タブナビゲーターを持つコンポーネントを定義 ---
 function MainTabNavigator() {
-  // 仮の設定画面コンポーネント
+  // ▼▼▼【修正点】仮の設定画面コンポーネントを削除 ▼▼▼
+  /*
   const SettingsScreen = () => (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
       <Text>設定画面（準備中）</Text>
     </View>
   );
+  */
+  // ▲▲▲ ここまで ▲▲▲
 
   return (
     <Tab.Navigator
@@ -70,7 +72,7 @@ function MainTabNavigator() {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'RecordTab') {
             iconName = focused ? 'calendar' : 'calendar-outline';
-          } else if (route.name === 'SettingsTab') { // ◀◀◀ 追加
+          } else if (route.name === 'SettingsTab') {
             iconName = focused ? 'settings' : 'settings-outline';
           }
           return <Ionicons name={iconName} size={size} color={color} />;
@@ -85,6 +87,7 @@ function MainTabNavigator() {
     >
       <Tab.Screen name="HomeTab" component={ChatScreen} options={{ title: 'ホーム' }} />
       <Tab.Screen name="RecordTab" component={RecordScreen} options={{ title: '記録' }} />
+      {/* ▼▼▼【修正点】componentをインポートしたSettingsScreenに変更 ▼▼▼ */}
       <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: '設定' }} />
     </Tab.Navigator>
   );
@@ -98,7 +101,6 @@ export default function App() {
  
     useEffect(() => {
     if (Platform.OS === 'android') {
-      // 背景を黒、アイコンを白に強制（Expo Goでも確実に効く）
       RNStatusBar.setBackgroundColor('#000000', true);
       RNStatusBar.setBarStyle('light-content', true);
       RNStatusBar.setTranslucent(false);
@@ -106,7 +108,6 @@ export default function App() {
   }, []);
 
     useEffect(() => {
-        // ... (この中のロジックは変更なし)
         loadInitialRecords();
         const initializeAppAndGetToken = async (user) => { /* ... */ };
         const unsubscribe = onAuthStateChanged(auth, initializeAppAndGetToken);
@@ -119,25 +120,22 @@ export default function App() {
         };
     }, []);
 
-    // --- アプリ全体のナビゲーション構造を修正 ---
     return (
         <SafeAreaProvider>
         <NavigationContainer>
             <Stack.Navigator
-  screenOptions={{
-     statusBarColor: '#000000',      // Androidのバー背景
-     statusBarStyle: 'light',        // アイコンを白
-     statusBarTranslucent: false,    // 下に潜らせない
-   }}
- >
-                {/* メイン画面としてタブナビゲーターを配置 */}
+              screenOptions={{
+                 statusBarColor: '#000000',
+                 statusBarStyle: 'light',
+                 statusBarTranslucent: false,
+               }}
+            >
                 <Stack.Screen 
                   name="Main" 
                   component={MainTabNavigator} 
                   options={{ headerShown: false }} 
                 />
                 
-                {/* タブの上に重ねて表示する画面 */}
                 <Stack.Screen name="Plan" component={PlanScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="SuggestedPlans" component={SuggestedPlansScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="DayPlan" component={DayPlanScreen} options={{ headerShown: false }} />

@@ -3,12 +3,11 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getFirestore, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-// ▼▼▼【修正点】signInAnonymouslyを追加▼▼▼
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getApp } from 'firebase/app';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import mockPlans from '../mock/suggestedPlans.js';
+// import mockPlans from '../mock/suggestedPlans.js'; // ダミーデータはもう不要
 
 // --- ヘルパーコンポーネント ---
 const DetailSection = ({ icon, title, children }) => (
@@ -34,26 +33,34 @@ const SuggestedPlansScreen = ({ navigation }) => {
   const planDayFromUrl = useMemo(() => httpsCallable(functions, 'planDayFromUrl', { timeout: 540000 }), [functions]);
 
   useEffect(() => {
+    // ▼▼▼【修正点】開発モードでのダミーデータ読み込みロジックを削除 ▼▼▼
+    /*
     if (__DEV__) {
       setPlans(mockPlans);
       setIsLoading(false);
       return; 
     }
+    */
+    // ▲▲▲ ここまで ▲▲▲
+
     const user = auth.currentUser;
     if (!user) {
+      console.log("ユーザーが認証されていません。プランの取得をスキップします。");
       setIsLoading(false);
       return;
     }
+    console.log(`Firestoreからプランを取得します (user: ${user.uid})`);
     const q = query(
       collection(db, 'users', user.uid, 'suggestedPlans'),
       orderBy('createdAt', 'desc')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const plansData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log(`${plansData.length}件のプランをFirestoreから取得しました。`);
       setPlans(plansData);
       setIsLoading(false);
     }, (error) => {
-      console.error("Failed to fetch plans:", error);
+      console.error("プランの取得に失敗:", error);
       Alert.alert("エラー", "プランの取得に失敗しました。");
       setIsLoading(false);
     });
@@ -72,7 +79,6 @@ const SuggestedPlansScreen = ({ navigation }) => {
     }
     setIsPlanning(selectedPlan.url);
     try {
-      // ▼▼▼【修正点】AIを呼び出す前に認証チェックを追加▼▼▼
       let user = auth.currentUser;
       if (!user) {
         console.log("ユーザーが未認証のため、匿名サインインを試みます...");
@@ -82,7 +88,6 @@ const SuggestedPlansScreen = ({ navigation }) => {
       if (!user) {
         throw new Error('認証に失敗しました。アプリを再起動してみてください。');
       }
-      // ▲▲▲【ここまで】▲▲▲
       
       console.log(`認証OK (UID: ${user.uid})。dayPlannerを呼び出します...`);
       const originAddress = await AsyncStorage.getItem('user_location');
@@ -121,6 +126,7 @@ const SuggestedPlansScreen = ({ navigation }) => {
       {plans.length === 0 ? (
         <View style={styles.centered}>
           <Text style={styles.emptyText}>プラン候補はまだありません。</Text>
+          <Text style={styles.emptySubText}>プランを生成すると、ここに表示されます。</Text>
         </View>
       ) : (
         <FlatList
@@ -211,12 +217,13 @@ const SuggestedPlansScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   container: { flex: 1, backgroundColor: '#F7F7F7' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 16, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#EEE' },
   backButton: { padding: 4 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-  emptyText: { fontSize: 18, color: 'gray' },
+  emptyText: { fontSize: 18, color: 'gray', textAlign: 'center' },
+  emptySubText: { fontSize: 14, color: '#A0A0A0', marginTop: 8, textAlign: 'center' },
   listContainer: { padding: 16 },
   planCard: { backgroundColor: 'white', borderRadius: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5, overflow: 'hidden' },
   cardImage: { width: '100%', height: 180 },

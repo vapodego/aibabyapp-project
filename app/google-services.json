@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "572812887246",
+    "project_id": "aibabyapp-abeae",
+    "storage_bucket": "aibabyapp-abeae.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:572812887246:android:8ac4f7d01849b699233c9f",
+        "android_client_info": {
+          "package_name": "com.example.notifierappexpo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1qtlm3oG_Cyh9WeJeSJEs5cm5q30q2vs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

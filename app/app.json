@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-        "androidStatusBar": {
+    "androidStatusBar": {
       "hidden": false,
       "translucent": false,
       "barStyle": "light-content",
@@ -19,7 +19,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yosukeaaa.moonshotchat",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -40,7 +44,7 @@
       "**/*"
     ],
     "plugins": [
-      "expo-audio"
+      "expo-av"
     ],
     "extra": {
       "eas": {
