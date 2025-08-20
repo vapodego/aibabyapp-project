@@ -9,7 +9,8 @@
  */
 
 const { callGenerativeAi, toolGetHtmlContent } = require('../utils');
-const pLimit = require('p-limit');
+const _pLimit = require('p-limit');
+const pLimit = _pLimit.default || _pLimit; // ESM/CJS 両対応
 const limitFetch = pLimit(1);   // HTML取得は外向きスパイクを防ぐため1
 const limitLite  = pLimit(3);   // 軽い判定・整形は2〜3
 const limitLLM   = pLimit(2);   // LLM呼び出しは2（必要に応じて調整）

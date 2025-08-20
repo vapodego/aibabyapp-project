@@ -1,13 +1,13 @@
-const functions = require("firebase-functions");
+const { https } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const { Expo } = require("expo-server-sdk");
 
 // Expoの初期化
 const expo = new Expo();
 
-exports.sendTestNotification = functions
-  .region("asia-northeast1")
-  .https.onRequest(async (req, res) => {
+exports.sendTestNotification = https.onRequest(
+  { timeoutSeconds: 60, memory: "256MiB" },
+  async (req, res) => {
     // --- 1. Firestoreからテスト対象ユーザーの情報を取得 ---
     // 先ほどのログで確認した、あなたのユーザーIDをここに指定します。
     const testUserId = "aiJOSnmUIEZxZ2DUqUzOOjvtd982"; 
@@ -62,4 +62,5 @@ exports.sendTestNotification = functions
       console.error("通知の送信に失敗:", error);
       res.status(500).send("通知の送信中にエラーが発生しました。");
     }
-  });
+  }
+);

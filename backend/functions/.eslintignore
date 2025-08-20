@@ -1,0 +1,17 @@
+# Ignore legacy/archived sources that contain experimental or broken snippets
+weeklyPlanner_archive/**
+weeklyPlanner_分割前.js
+weeklyPlanner_自己流.js
+DayPlanner_分割前.js
+
+# Temporarily ignore the top-level agents aggregator that includes legacy regex
+agents.js
+
+# Common directories (defensive)
+node_modules/
+coverage/
+lib/
+dist/
+
+# Firebase build/debug outputs (optional)
+firebase-debug.log

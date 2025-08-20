@@ -3,7 +3,7 @@
  * 全自動デイプランナー (dayPlanner.js) - 司令塔 (最終FIX版)
  * =================================================================
  */
-const functions = require("firebase-functions");
+const { https } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const { FieldValue } = require("firebase-admin/firestore");
 
@@ -15,10 +15,9 @@ const { agentEventSummarizer, agentFacilityResearcher, agentWeatherForecaster } 
 const { getGeocodedLocation } = require('./utils');
 const { generateDayPlanHtmlResponse } = require('./htmlGenerator');
 
-exports.runDayPlannerManually = functions
-  .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 540, memory: "2GB" })
-  .https.onRequest(async (req, res) => {
+exports.runDayPlannerManually = https.onRequest(
+  { timeoutSeconds: 540, memory: "2GiB" },
+  async (req, res) => {
     console.log("【Day Planner 手動実行】を開始します。");
     
     const testEventUrl = "https://www.welcome.city.yokohama.jp/eventinfo/ev_detail.php?bid=yw12492";
@@ -75,13 +74,18 @@ exports.runDayPlannerManually = functions
       console.error("[Day Planner 手動実行] エラー:", error);
       res.status(500).send(`エラーが発生しました: ${error.message}`);
     }
-  });
+  }
+);
 
-// アプリから呼び出す本番用の関数も同様に修正
-exports.planDayFromUrl = functions
-  .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 540, memory: "2GB" })
-  .https.onCall(async (data, context) => {
-    // (本番用の関数もrunDayPlannerManuallyと同様のロジックで情報を統合してください)
-    // ...
-  });
+exports.planDayFromUrl = https.onCall(
+  { timeoutSeconds: 540, memory: "2GiB" },
+  async (request) => {
+    const { data, auth } = request;
+    if (!auth) {
+      throw new https.HttpsError("unauthenticated", "認証が必要です。");
+    }
+    // (本番用の関数も runDayPlannerManually と同様のロジックで情報を統合してください)
+    // ... 既存処理をここに実装 ...
+    return { status: "not_implemented" };
+  }
+);

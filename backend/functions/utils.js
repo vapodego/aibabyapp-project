@@ -1,26 +1,55 @@
 /**
  * =================================================================
- * Day Planner用 ユーティリティ関数群 (エラー修正版)
+ * Day Planner用 ユーティリティ関数群 (Gen2 環境変数対応 & 安全化)
  * =================================================================
  */
 
-const functions = require("firebase-functions");
 const fetch = require('node-fetch');
-const https = require('https'); // ★★★ httpsモジュールをインポート
+const https = require('https'); // ★ httpsモジュールをインポート
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const GEMINI_API_KEY = functions.config().gemini?.key;
-let genAI;
-if (GEMINI_API_KEY) {
-  genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+// --------------------
+// 環境変数ヘルパ
+// --------------------
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(
+      `Missing env var ${name}. Set Secret "${name}" and attach via runWith({ secrets: ['${name}'] }).`
+    );
+  }
+  return v;
+}
+
+function getGoogleSearchKeys() {
+  return {
+    apiKey: requireEnv("GOOGLE_API_KEY"),
+    cseId: requireEnv("GOOGLE_CSE_ID"),
+  };
+}
+
+// --------------------
+// Gemini 初期化は遅延評価（起動時例外を避ける）
+// --------------------
+let genAI = null;
+function getGenAI() {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    console.error("[Gemini] GEMINI_API_KEY が未設定です（Secret を作成し runWith でアタッチしてください）。");
+    return null;
+  }
+  if (!genAI) {
+    genAI = new GoogleGenerativeAI(key);
+  }
+  return genAI;
 }
 
 /**
  * Gemini APIを呼び出す共通関数 (モデル指定可能、リトライ機能付き)
  */
 async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-1.5-flash-latest", maxRetries = 3) {
-    if (!genAI) {
-        console.error("Gemini AIが初期化されていません。");
+    const client = getGenAI();
+    if (!client) {
         return null;
     }
 
@@ -32,7 +61,7 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const model = genAI.getGenerativeModel({
+            const model = client.getGenerativeModel({
                 model: modelName,
                 generationConfig: {
                     temperature: expectJson ? 0.2 : 0.0,
@@ -53,7 +82,7 @@ async function callGenerativeAi(prompt, expectJson = false, modelName = "gemini-
             } catch (e1) {
                 console.warn(`[Gemini] JSON parse失敗(1st) → 修復パスへ: ${e1.message}`);
                 // 第2パス: JSON修復をLLMに依頼
-                const fixer = genAI.getGenerativeModel({
+                const fixer = client.getGenerativeModel({
                     model: modelName.includes('pro') ? modelName : 'gemini-1.5-pro-latest',
                     generationConfig: { responseMimeType: 'application/json', temperature: 0 }
                 });
@@ -166,14 +195,20 @@ async function toolGetHtmlContent(url, { minLength = 100, maxBytes = 2 * 1024 * 
 
 async function getGeocodedLocation(address) {
   if (!address) return null;
-  const GOOGLE_API_KEY = functions.config().google?.key;
-  if (!GOOGLE_API_KEY) return null;
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}&language=ja`;
+  const key = process.env.GOOGLE_API_KEY;
+  if (!key) {
+    console.error('[Geocode] GOOGLE_API_KEY が未設定です。');
+    return null;
+  }
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${key}&language=ja`;
   try {
     const response = await fetch(url);
     const data = await response.json();
     return (data.status === 'OK' && data.results[0]) ? data.results[0].geometry.location : null;
-  } catch (error) { return null; }
+  } catch (error) {
+    console.error('[Geocode] fetch 失敗:', error?.message || error);
+    return null;
+  }
 }
 
 function getWeatherDescription(code) {
@@ -186,10 +221,16 @@ function getWeatherDescription(code) {
 }
 
 module.exports = {
-    callGenerativeAi,
-    toolGetHtmlContent,
-    getGeocodedLocation,
-    getWeatherDescription,
-    isExcluded,
-    EXCLUDED_DOMAINS,
+  // env helpers
+  requireEnv,
+  getGoogleSearchKeys,
+  // ai
+  callGenerativeAi,
+  // http/html
+  toolGetHtmlContent,
+  // misc
+  getGeocodedLocation,
+  getWeatherDescription,
+  isExcluded,
+  EXCLUDED_DOMAINS,
 };

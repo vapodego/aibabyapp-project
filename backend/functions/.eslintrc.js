@@ -1,28 +1,26 @@
 module.exports = {
+  root: true,
   env: {
-    es6: true,
     node: true,
+    es2021: true,
   },
   parserOptions: {
-    "ecmaVersion": 2018,
+    ecmaVersion: "latest", // allow optional chaining, numeric separators, etc.
+    sourceType: "script",
   },
   extends: [
     "eslint:recommended",
-    "google",
   ],
   rules: {
-    "no-restricted-globals": ["error", "name", "length"],
-    "prefer-arrow-callback": "error",
-    "quotes": ["error", "double", {"allowTemplateLiterals": true}],
+    // Do not block deploys for style-only issues during migration
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "quotes": "off",
   },
   overrides: [
     {
       files: ["**/*.spec.*"],
-      env: {
-        mocha: true,
-      },
+      env: { mocha: true },
       rules: {},
     },
   ],
-  globals: {},
 };

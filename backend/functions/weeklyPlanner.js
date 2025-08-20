@@ -7,26 +7,53 @@
  * - プレビューAPIを追加：保存済みプランを HTML で返す
  */
 
-const functions = require("firebase-functions");
+const { https } = require("firebase-functions/v2");
+const { defineSecret } = require("firebase-functions/params");
+
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const GOOGLE_API_KEY = defineSecret("GOOGLE_API_KEY");
+const GOOGLE_CSE_ID  = defineSecret("GOOGLE_CSE_ID");
 const admin = require("firebase-admin");
-const pLimit = require("p-limit");
+// Initialize Admin SDK if not already initialized (safe for v2/Cloud Run)
+try {
+  if (!admin.apps || admin.apps.length === 0) {
+    admin.initializeApp();
+  }
+} catch (_) {
+  // no-op: another module likely initialized already
+}
+const pLimit = require("p-limit").default || require("p-limit");
+
 // 段階別の並列度
 const limitFetch = pLimit(1);   // HTML取得は外向きスパイクを防ぐため1
 const limitLite  = pLimit(3);   // 軽い判定・整形は2〜3
 const limitLLM   = pLimit(2);   // LLM呼び出しは2（必要に応じて調整）
 
-const agents = require("./agents/weeklyPlannerAgents");
-const weeklyUtils = require("./utils/weeklyPlannerUtils");
-const { toolGetHtmlContent } = require("./utils/weeklyPlannerUtils");
+// Lazy-load heavy deps on first use to avoid Cloud Run boot crashes
+let agents;
+let weeklyUtils;
+let toolGetHtmlContent;
+function ensureDepsLoaded() {
+  if (!agents) {
+    agents = require("./agents/weeklyPlannerAgents");
+  }
+  if (!weeklyUtils) {
+    weeklyUtils = require("./utils/weeklyPlannerUtils");
+  }
+  if (!toolGetHtmlContent) {
+    toolGetHtmlContent = weeklyUtils.toolGetHtmlContent;
+  }
+}
+
 
 // =================================================================
 // 手動実行用の関数 (ローカル検証)
 // =================================================================
-exports.runWeeklyPlansManually = functions
-  .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 540, memory: "2GB", secrets: ["GOOGLE_API_KEY", "GOOGLE_CSE_ID"] })
-  .https.onRequest(async (req, res) => {
+exports.runWeeklyPlansManually = https.onRequest(
+  { timeoutSeconds: 540, memory: "2GiB", secrets: [GOOGLE_API_KEY, GOOGLE_CSE_ID, GEMINI_API_KEY] },
+  async (req, res) => {
     console.log("【ローカル実行】runWeeklyPlansManually関数がトリガーされました。");
+    ensureDepsLoaded();
 
     // クエリから userId と UI モードを取得（既定はテストユーザー／JSON 202 応答）
     const userId = (req.query.userId || "test-user-01").toString();
@@ -65,11 +92,17 @@ exports.runWeeklyPlansManually = functions
     })();
 
     if (uiMode === "html") {
-      // ポーリングして自動でプレビューへ遷移する簡易UIを返す
-      const previewUrl = `/aibabyapp-abeae/asia-northeast1/previewWeeklyPlans?userId=${encodeURIComponent(userId)}`;
-      const statusUrl = `/aibabyapp-abeae/asia-northeast1/getPlanStatus?userId=${encodeURIComponent(userId)}`;
-      const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>週次プラン生成中...</title><script>async function poll(){try{const r=await fetch('${statusUrl}',{cache:'no-store'});const j=await r.json();if(j.status==='completed'){location.replace('${previewUrl}');return;} }catch(e){} setTimeout(poll, 1500);}window.addEventListener('load', poll);</script><style>body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;} .box{max-width:720px;margin:10vh auto;padding:24px;border:1px solid #eee;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.06);background:#fff;text-align:center} .spin{width:36px;height:36px;border:4px solid #ddd;border-top-color:#0ea5e9;border-radius:50%;margin:12px auto;animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(1turn)}}</style></head><body><div class="box"><div class="spin"></div><h1>週次プランを生成しています...</h1><p>完了すると自動的に表示ページへ移動します。</p><p style="margin-top:12px"><a href="${previewUrl}">手動で開く</a></p></div></body></html>`;
-      res.set('Content-Type','text/html; charset=utf-8');
+      // Cloud Functions v2/Cloud Run 環境でも安定して到達できる絶対URLを生成する
+      const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "aibabyapp-abeae";
+      const region = "asia-northeast1";
+      const previewUrl = `https://${region}-${projectId}.cloudfunctions.net/previewWeeklyPlans?userId=${encodeURIComponent(userId)}`;
+      const statusUrl  = `https://${region}-${projectId}.cloudfunctions.net/getPlanStatus?userId=${encodeURIComponent(userId)}`;
+
+      const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>週次プラン生成中...</title><script>async function poll(){try{const r=await fetch('${statusUrl}',{cache:'no-store'});const j=await r.json();if(j.status==='completed'){location.replace('${previewUrl}');return;}}catch(e){} setTimeout(poll,1500);}window.addEventListener('load',poll);</script><style>body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;} .box{max-width:720px;margin:10vh auto;padding:24px;border:1px solid #eee;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.06);background:#fff;text-align:center} .spin{width:36px;height:36px;border:4px solid #ddd;border-top-color:#0ea5e9;border-radius:50%;margin:12px auto;animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(1turn)}}</style></head><body><div class="box"><div class="spin"></div><h1>週次プランを生成しています...</h1><p>完了すると自動的に表示ページへ移動します。</p><p style="margin-top:12px"><a href="${previewUrl}">手動で開く</a></p></div></body></html>`;
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
       return res.status(200).send(html);
     }
 
@@ -77,27 +110,29 @@ exports.runWeeklyPlansManually = functions
     try {
       return res.status(202).json({ status: "accepted", message: "週次お出かけプラン生成をバックグラウンドで開始しました。", userId });
     } catch (_) { return; }
-  });
+  }
+);
 
 // =================================================================
 // アプリ（onCall）からの実行
 // =================================================================
-exports.generatePlansOnCall = functions
-  .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 540, memory: "2GB", secrets: ["GOOGLE_API_KEY", "GOOGLE_CSE_ID"] })
-  .https.onCall(async (data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError("unauthenticated", "認証が必要です。");
+exports.generatePlansOnCall = https.onCall(
+  { timeoutSeconds: 540, memory: "2GiB", secrets: [GOOGLE_API_KEY, GOOGLE_CSE_ID, GEMINI_API_KEY] },
+  async (request) => {
+    const { data, auth } = request;
+    ensureDepsLoaded();
+    if (!auth) {
+      throw new https.HttpsError("unauthenticated", "認証が必要です。");
     }
-    const userId = context.auth.uid;
+    const userId = auth.uid;
     const userRef = admin.firestore().collection("users").doc(userId);
     await userRef.set({ planGenerationStatus: "in_progress" }, { merge: true });
 
     console.log("--- アプリから受信したデータ ---", JSON.stringify(data, null, 2));
 
-    const { location, interests, maxResults, dateRange } = data;
+    const { location, interests, maxResults, dateRange } = data || {};
     if (!location || !interests) {
-      throw new functions.https.HttpsError("invalid-argument", "地域と興味は必須です。");
+      throw new https.HttpsError("invalid-argument", "地域と興味は必須です。");
     }
 
     (async () => {
@@ -124,12 +159,14 @@ exports.generatePlansOnCall = functions
     })();
 
     return { status: "processing_started" };
-  });
+  }
+);
 
 // =================================================================
 // メイン処理フロー
 // =================================================================
 async function generatePlansForUser(userId, userData) {
+  ensureDepsLoaded();
   console.log(`--- generatePlansForUserに渡されたuserData ---`, JSON.stringify(userData, null, 2));
 
   // 行動範囲をAIで決定（失敗時は住所フォールバック）
@@ -318,10 +355,10 @@ async function generatePlansForUser(userId, userData) {
 // =================================================================
 // プレビュー用: 保存済みプランをHTMLで返す
 // =================================================================
-exports.previewWeeklyPlans = functions
-  .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 120, memory: "512MB" })
-  .https.onRequest(async (req, res) => {
+exports.previewWeeklyPlans = https.onRequest(
+  { timeoutSeconds: 120, memory: "512MiB", secrets: [GOOGLE_API_KEY, GOOGLE_CSE_ID, GEMINI_API_KEY] },
+  async (req, res) => {
+    ensureDepsLoaded();
     try {
       const db = admin.firestore();
       const userId = (req.query.userId || "test-user-01").toString();
@@ -361,14 +398,14 @@ exports.previewWeeklyPlans = functions
         .status(500)
         .json({ error: String(err && err.message ? err.message : err) });
     }
-  });
+  }
+);
 // =================================================================
 // 生成ステータス取得API: { status: 'in_progress' | 'completed' }
 // =================================================================
-exports.getPlanStatus = functions
-  .region("asia-northeast1")
-  .runWith({ timeoutSeconds: 60, memory: "256MB" })
-  .https.onRequest(async (req, res) => {
+exports.getPlanStatus = https.onRequest(
+  { timeoutSeconds: 60, memory: "256MiB", secrets: [GOOGLE_API_KEY, GOOGLE_CSE_ID, GEMINI_API_KEY] },
+  async (req, res) => {
     try {
       const userId = (req.query.userId || "test-user-01").toString();
       const doc = await admin.firestore().collection('users').doc(userId).get();
@@ -379,4 +416,5 @@ exports.getPlanStatus = functions
       console.error('[getPlanStatus エラー]', e);
       return res.status(500).json({ status: 'error' });
     }
-  });
+  }
+);

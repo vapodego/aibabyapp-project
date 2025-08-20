@@ -4,13 +4,26 @@
  * ※ Cloud Functions はここに置かない（純ユーティリティ）。
  */
 
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
-const https = require('https');
-const fetch = require('node-fetch');
 const { JSDOM } = require('jsdom');
 const { FieldValue } = require("firebase-admin/firestore");
+
 const cheerio = require('cheerio');
+let pLimitLib = require('p-limit');
+const pLimit = (typeof pLimitLib === 'function') ? pLimitLib : pLimitLib.default;
+
+// --- Secrets handling (Functions v2 with Secret Manager) ---
+// Default to environment variables (when attached via runWith({secrets: [...] }))
+// but allow the orchestrator to inject/override them at runtime.
+let _secrets = {
+  googleApiKey: process.env.GOOGLE_API_KEY || null,
+  googleCx: process.env.GOOGLE_CSE_ID || process.env.GOOGLE_CX || null,
+};
+
+function setSecrets({ googleKey, cseId } = {}) {
+  if (googleKey) _secrets.googleApiKey = googleKey;
+  if (cseId) _secrets.googleCx = cseId;
+}
 
 // --- HTML取得の共通設定（短タイムアウト + 1リトライ / UA/言語ヘッダ / 除外ドメイン） ---
 const EXCLUDED_DOMAINS = new Set([
@@ -25,7 +38,13 @@ function isExcludedDomain(url) {
   } catch (_) { return false; }
 }
 
-async function fetchWithAbort(url, { timeoutMs = 6000, headers = {}, redirect = 'follow', agent } = {}) {
+// --- Concurrency control (p-limit) ---
+// "取得だけ" はネットワーク混雑・ブロック回避のため 1 並列に制限。
+// それ以外（軽〜中程度処理）は 2-3 並列に抑える。
+const limitFetch = pLimit(1);
+const limitHeavy = pLimit(3);
+
+async function fetchWithAbort(url, { timeoutMs = 6000, headers = {}, redirect = 'follow' } = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -36,8 +55,7 @@ async function fetchWithAbort(url, { timeoutMs = 6000, headers = {}, redirect = 
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127 Safari/537.36',
         'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
         ...headers,
-      },
-      agent,
+      }
     });
     return res;
   } finally {
@@ -49,55 +67,52 @@ async function fetchWithAbort(url, { timeoutMs = 6000, headers = {}, redirect = 
  * HTMLを取得（5–6秒 + 1リトライ, UA/言語ヘッダ, 除外ドメインスキップ）
  */
 async function toolGetHtmlContent(url, { minLength = 100 } = {}) {
-  if (!url) return null;
-  if (isExcludedDomain(url)) {
-    console.warn(`[HTML] excluded domain skip: ${url}`);
-    return null;
-  }
-
-  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-  const agent = isEmulator ? undefined : new https.Agent({ keepAlive: false });
-
-  // 1st try
-  try {
-    const res = await fetchWithAbort(url, { timeoutMs: 6000, agent });
-    if (!res.ok) return null;
-    const text = await res.text();
-    return (text && text.trim().length >= minLength) ? text : null;
-  } catch (e1) {
-    // 2nd try with small backoff and slightly longer timeout
-    await new Promise(r => setTimeout(r, 400));
-    try {
-      const res2 = await fetchWithAbort(url, { timeoutMs: 7500, agent });
-      if (!res2.ok) return null;
-      const text2 = await res2.text();
-      return (text2 && text2.trim().length >= minLength) ? text2 : null;
-    } catch (e2) {
-      console.error(`> HTML取得ツールエラー (URL: ${url}):`, e2.type || e2.message || String(e2));
+  return limitFetch(async () => {
+    if (!url) return null;
+    if (isExcludedDomain(url)) {
+      console.warn(`[HTML] excluded domain skip: ${url}`);
       return null;
     }
-  }
+
+    // 1st try (≈6s)
+    try {
+      const res = await fetchWithAbort(url, { timeoutMs: 6000 });
+      if (!res.ok) return null;
+      const text = await res.text();
+      return (text && text.trim().length >= minLength) ? text : null;
+    } catch (e1) {
+      // 2nd try with small backoff and slightly longer timeout (≈7.5s)
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        const res2 = await fetchWithAbort(url, { timeoutMs: 7500 });
+        if (!res2.ok) return null;
+        const text2 = await res2.text();
+        return (text2 && text2.trim().length >= minLength) ? text2 : null;
+      } catch (e2) {
+        console.error(`> HTML取得ツールエラー (URL: ${url}):`, e2.type || e2.message || String(e2));
+        return null;
+      }
+    }
+  });
 }
 
 /**
  * Google Custom Search API を使ってWeb検索を実行
  */
 async function toolGoogleSearch(query, num = 10) {
-  if (!GOOGLE_API_KEY || !GOOGLE_CX) {
+  if (!_secrets.googleApiKey || !_secrets.googleCx) {
     console.error("> Web検索中止: Google APIキーまたはCXが未設定です。");
     return [];
   }
-  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-  const agent = isEmulator ? undefined : new https.Agent({ keepAlive: false });
 
   const dateRestrict = 'm[1]';
   const fullQuery = `${query}`.trim();
 
   console.log(`> [Google検索実行] クエリ: ${fullQuery}`);
-  const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(fullQuery)}&gl=jp&hl=ja&num=${num}&dateRestrict=${dateRestrict}`;
+  const url = `https://www.googleapis.com/customsearch/v1?key=${_secrets.googleApiKey}&cx=${_secrets.googleCx}&q=${encodeURIComponent(fullQuery)}&gl=jp&hl=ja&num=${num}&dateRestrict=${dateRestrict}`;
 
   try {
-    const response = await fetch(url, { agent });
+    const response = await fetch(url);
     const data = await response.json();
     if (data.error) throw new Error(JSON.stringify(data.error));
     return data.items ? data.items.map((item) => ({ eventName: item.title, url: item.link })) : [];
@@ -134,8 +149,8 @@ function toolExtractEventUrls(html, baseUrl) {
  * 画像検索（フォールバック用）
  */
 async function toolGoogleImageSearch(query) {
-  if (!GOOGLE_API_KEY || !GOOGLE_CX) return null;
-  const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}&gl=jp&hl=ja&searchType=image&num=1`;
+  if (!_secrets.googleApiKey || !_secrets.googleCx) return null;
+  const url = `https://www.googleapis.com/customsearch/v1?key=${_secrets.googleApiKey}&cx=${_secrets.googleCx}&q=${encodeURIComponent(query)}&gl=jp&hl=ja&searchType=image&num=1`;
   try {
     const response = await fetch(url);
     const data = await response.json();
@@ -183,7 +198,7 @@ function parseImagesFromHtml(baseUrl, html) {
 async function findBestImageForEvent(candidate, htmlContent, agentVisualScout) {
   const imageCandidates = parseImagesFromHtml(candidate.url, htmlContent);
   if (imageCandidates.og_image || imageCandidates.image_list.length > 0) {
-    const result = await agentVisualScout(candidate, imageCandidates);
+    const result = await limitHeavy(() => agentVisualScout(candidate, imageCandidates));
     if (result && result.selectedImageUrl) return result.selectedImageUrl;
   }
   const fallbackQuery = `${candidate.location?.name || ''} ${candidate.eventName}`;
@@ -290,6 +305,8 @@ function generateHtmlResponse(plans, categorizedAlternatives, userId, location, 
 <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>今週のおすすめお出かけプラン</title><script src="https://cdn.tailwindcss.com"></script><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet"><style>body { font-family: 'Inter', sans-serif; }</style></head><body class="bg-gray-100"><div class="container mx-auto p-4 md:p-8"><header class="text-center mb-10"><h1 class="text-4xl font-bold text-gray-800">今週のおすすめお出かけプラン</h1><p class="text-gray-500 mt-2">AIがあなたのために厳選しました (ユーザーID: ${userId}, 場所: ${location})</p></header><main>${plansHtml}</main>${alternativesHtml}${allUrlsHtml}</div></body></html>`;
 }
 
+// Expose limiters so orchestrators (weeklyPlanner.js 等) からも共有できる
+
 module.exports = {
   toolGoogleSearch,
   toolGoogleImageSearch,
@@ -299,4 +316,7 @@ module.exports = {
   generateHtmlResponse,
   toolExtractEventUrls,
   toolGetHtmlContent,
+  limitFetch,
+  limitHeavy,
+  setSecrets,
 };
