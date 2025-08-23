@@ -108,6 +108,16 @@ const DayPlanScreen = ({ route, navigation }) => {
         <View style={styles.eventHeader}>
             <Text style={styles.resultTitle}>{detailedPlan.eventName}</Text>
             {detailedPlan.date && <Text style={styles.resultDate}>{detailedPlan.date}</Text>}
+            {(detailedPlan?.eventUrl || detailedPlan?.url) ? (
+              <TouchableOpacity
+                onPress={() => Linking.openURL(detailedPlan.eventUrl || detailedPlan.url)}
+                style={styles.eventLinkButton}
+                accessibilityRole="button"
+              >
+                <Ionicons name="link-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.eventLinkText}>イベントページを開く</Text>
+              </TouchableOpacity>
+            ) : null}
         </View>
 
         {/* --- ▼▼▼ 地図コンポーネント ▼▼▼ --- */}
@@ -218,6 +228,21 @@ const styles = StyleSheet.create({
     scheduleDetails: { fontSize: 14, color: '#868E96', marginTop: 4 },
 
     adviceText: { fontSize: 15, color: '#495057', lineHeight: 24, },
+
+    eventLinkButton: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#2563EB',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+    },
+    eventLinkText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '700',
+    },
 });
 
 export default DayPlanScreen;

@@ -10,6 +10,38 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // import mockPlans from '../mock/suggestedPlans.js'; // ダミーデータはもう不要
 
 // --- ヘルパーコンポーネント ---
+// 値が string / array / object でも安全に描画するユーティリティ
+const renderDetailValue = (value, textStyle) => {
+  if (value == null) return null;
+  // 文字列ならそのまま
+  if (typeof value === 'string') {
+    return <Text style={textStyle}>{value}</Text>;
+  }
+  // 配列なら箇条書き
+  if (Array.isArray(value)) {
+    return (
+      <View style={{ gap: 6 }}>
+        {value.map((item, idx) => (
+          <Text key={idx} style={textStyle}>• {String(item)}</Text>
+        ))}
+      </View>
+    );
+  }
+  // オブジェクトなら key: value で列挙
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    return (
+      <View style={{ gap: 6 }}>
+        {entries.map(([k, v]) => (
+          <Text key={String(k)} style={textStyle}>{String(k)}：{typeof v === 'string' ? v : Array.isArray(v) ? v.join(', ') : JSON.stringify(v)}</Text>
+        ))}
+      </View>
+    );
+  }
+  // それ以外は文字列化
+  return <Text style={textStyle}>{String(value)}</Text>;
+};
+
 const DetailSection = ({ icon, title, children }) => (
   <View style={styles.detailSection}>
     <View style={styles.detailSectionHeader}>
@@ -33,38 +65,69 @@ const SuggestedPlansScreen = ({ navigation }) => {
   const planDayFromUrl = useMemo(() => httpsCallable(functions, 'planDayFromUrl', { timeout: 540000 }), [functions]);
 
   useEffect(() => {
-    // ▼▼▼【修正点】開発モードでのダミーデータ読み込みロジックを削除 ▼▼▼
-    /*
-    if (__DEV__) {
-      setPlans(mockPlans);
-      setIsLoading(false);
-      return; 
-    }
-    */
-    // ▲▲▲ ここまで ▲▲▲
+    let isMounted = true;
 
-    const user = auth.currentUser;
-    if (!user) {
-      console.log("ユーザーが認証されていません。プランの取得をスキップします。");
-      setIsLoading(false);
-      return;
-    }
-    console.log(`Firestoreからプランを取得します (user: ${user.uid})`);
-    const q = query(
-      collection(db, 'users', user.uid, 'suggestedPlans'),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const plansData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log(`${plansData.length}件のプランをFirestoreから取得しました。`);
-      setPlans(plansData);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("プランの取得に失敗:", error);
-      Alert.alert("エラー", "プランの取得に失敗しました。");
-      setIsLoading(false);
-    });
-    return () => unsubscribe();
+    (async () => {
+      try {
+        // 1) 必ず匿名認証して UID を確定させる
+        let user = auth.currentUser;
+        if (!user) {
+          console.log('[auth] No current user. Signing in anonymously...');
+          await signInAnonymously(auth);
+          user = auth.currentUser;
+        }
+        if (!user) {
+          console.warn('[auth] Anonymous sign-in failed. Skip subscribing.');
+          if (isMounted) setIsLoading(false);
+          return;
+        }
+
+        // 2) ステータスの監視（進行中/完了/エラー）
+        const unsubStatus = onSnapshot(
+          // users/{uid} ドキュメントの planGenerationStatus を監視
+          // eslint-disable-next-line no-undef
+          require('firebase/firestore').doc(db, 'users', user.uid),
+          (docSnap) => {
+            const status = docSnap.data()?.planGenerationStatus ?? null;
+            setIsPlanning(status === 'in_progress' ? 'running' : null);
+          },
+          (err) => console.warn('[firestore] status onSnapshot error:', err)
+        );
+
+        // 3) 候補プラン一覧の購読
+        console.log(`Firestoreからプランを取得します (user: ${user.uid})`);
+        const plansQuery = query(
+          collection(db, 'users', user.uid, 'suggestedPlans'),
+          orderBy('createdAt', 'desc')
+        );
+        const unsubPlans = onSnapshot(
+          plansQuery,
+          (snapshot) => {
+            const plansData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+            console.log(`[firestore] suggestedPlans -> ${plansData.length} docs`);
+            if (isMounted) {
+              setPlans(plansData);
+              setIsLoading(false);
+            }
+          },
+          (error) => {
+            console.error('[firestore] suggestedPlans onSnapshot error:', error);
+            if (isMounted) setIsLoading(false);
+          }
+        );
+
+        // 4) クリーンアップ
+        return () => {
+          try { unsubPlans && unsubPlans(); } catch (_) {}
+          try { unsubStatus && unsubStatus(); } catch (_) {}
+        };
+      } catch (e) {
+        console.error('[auth/firestore] init error:', e);
+        if (isMounted) setIsLoading(false);
+      }
+    })();
+
+    return () => { isMounted = false; };
   }, [auth, db]);
   
   const handleShowDetails = (plan) => {
@@ -176,22 +239,22 @@ const SuggestedPlansScreen = ({ navigation }) => {
                 {selectedPlan.strategicGuide && (
                     <>
                         <DetailSection icon="heart-outline" title="このプランがあなたに最適な理由">
-                            <Text style={styles.detailText}>{selectedPlan.strategicGuide.whySpecial}</Text>
+                            {renderDetailValue(selectedPlan.strategicGuide.whySpecial, styles.detailText)}
                         </DetailSection>
                         <DetailSection icon="navigate-circle-outline" title="アクセス・基本情報">
-                            <Text style={styles.detailText}>{selectedPlan.strategicGuide.logistics}</Text>
+                            {renderDetailValue(selectedPlan.strategicGuide.logistics, styles.detailText)}
                         </DetailSection>
                         <DetailSection icon="happy-outline" title="赤ちゃん安心情報">
-                            <Text style={styles.detailText}>{selectedPlan.strategicGuide.babyInfo}</Text>
+                            {renderDetailValue(selectedPlan.strategicGuide.babyInfo, styles.detailText)}
                         </DetailSection>
                         <DetailSection icon="list-outline" title="モデルプラン">
-                            <Text style={styles.detailText}>{selectedPlan.strategicGuide.sampleItinerary}</Text>
+                            {renderDetailValue(selectedPlan.strategicGuide.sampleItinerary, styles.detailText)}
                         </DetailSection>
                         <DetailSection icon="briefcase-outline" title="持ち物リスト">
-                            <Text style={styles.detailText}>{selectedPlan.strategicGuide.packingList}</Text>
+                            {renderDetailValue(selectedPlan.strategicGuide.packingList, styles.detailText)}
                         </DetailSection>
                         <DetailSection icon="rainy-outline" title="もしもの時の代替案">
-                             <Text style={styles.detailText}>{selectedPlan.alternativePlan}</Text>
+                             {renderDetailValue(selectedPlan.alternativePlan, styles.detailText)}
                         </DetailSection>
                     </>
                 )}

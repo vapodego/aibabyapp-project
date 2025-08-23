@@ -17,10 +17,10 @@ import {
     KeyboardAvoidingView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -38,10 +38,13 @@ export default function ChatScreen({ navigation }) {
     const [isLoading, setIsLoading] = useState(true);
     const [expandedCardIndex, setExpandedCardIndex] = useState(null);
     const [planStatus, setPlanStatus] = useState('not_started');
+    const statusRef = useRef('not_started');
     const [isChatModalVisible, setIsChatModalVisible] = useState(false);
     const [chatHistory, setChatHistory] = useState([]);
     const [userInput, setUserInput] = useState('');
     const flatListRef = useRef(null);
+    const insets = useSafeAreaInsets();
+    const bottomPadding = (Platform.OS === 'ios' ? insets.bottom + 80 : insets.bottom + 70);
     
     // --- 副作用 (データ読み込み & 監視) ---
     const generateGreeting = useCallback(async () => {
@@ -62,24 +65,57 @@ export default function ChatScreen({ navigation }) {
 
     useFocusEffect(
         useCallback(() => {
-            const auth = getAuth();
-            const db = getFirestore();
-            const user = auth.currentUser;
+            let unsubscribe = null;
+            let cancelled = false;
 
-            if (!user) {
-                setPlanStatus('not_started');
-                return; 
-            }
-            
-            const unsubscribe = onSnapshot(doc(db, "users", user.uid), (doc) => {
-                const status = doc.data()?.planGenerationStatus || 'not_started';
-                setPlanStatus(status);
-            }, (error) => {
-                console.error("プラン状況の監視に失敗:", error);
-                setPlanStatus('not_started');
-            });
+            const run = async () => {
+                try {
+                    const auth = getAuth();
+                    let user = auth.currentUser;
+                    if (!user) {
+                        // 匿名認証でログイン（未ログイン時）
+                        try {
+                            await signInAnonymously(auth);
+                            user = auth.currentUser;
+                        } catch (e) {
+                            console.error('匿名認証に失敗:', e);
+                            setPlanStatus('not_started');
+                            return;
+                        }
+                    }
 
-            return () => unsubscribe();
+                    if (!user || cancelled) return;
+
+                    const db = getFirestore();
+                    unsubscribe = onSnapshot(
+                        doc(db, 'users', user.uid),
+                        (docSnap) => {
+                            const raw = docSnap.data()?.planGenerationStatus;
+                            const valid = (typeof raw === 'string' && ['not_started','in_progress','completed','error'].includes(raw)) ? raw : undefined;
+                            const next = (valid === undefined) ? statusRef.current : valid;
+                            if (next !== statusRef.current) {
+                                statusRef.current = next;
+                                setPlanStatus(next);
+                            }
+                        },
+                        (error) => {
+                            // console.error('プラン状況の監視に失敗:', error);
+                            setPlanStatus('not_started');
+                        }
+                    );
+                } catch (err) {
+                    console.error('useFocusEffect run error:', err);
+                }
+            };
+
+            run();
+
+            return () => {
+                cancelled = true;
+                if (typeof unsubscribe === 'function') {
+                    unsubscribe();
+                }
+            };
         }, [])
     );
 
@@ -101,24 +137,34 @@ export default function ChatScreen({ navigation }) {
     
     // --- レンダリング ---
     const renderPlanButton = () => {
-        if (planStatus === 'not_started' || !planStatus) return null;
-        
+        if (!planStatus || planStatus === 'not_started' || planStatus === 'in_progress' || planStatus === 'completed') {
+            return null;
+        }
+
         let iconName, buttonText, buttonStyle, textColor, iconColor, isDisabled = false, showActivityIndicator = false;
 
         switch (planStatus) {
             case 'in_progress':
                 iconName = "hourglass-outline";
-                buttonText = "プランを生成中です...";
+                buttonText = "プランを作成中です...";
                 buttonStyle = [styles.viewPlansButton, styles.processingButton];
                 isDisabled = true;
                 showActivityIndicator = true;
                 break;
             case 'completed':
                 iconName = "sparkles-outline";
-                buttonText = "新しいプランが届きました！";
+                buttonText = "プランが完成しました！";
                 buttonStyle = [styles.viewPlansButton, styles.completedButton];
                 textColor = 'white';
                 iconColor = 'white';
+                break;
+            case 'error':
+                iconName = "alert-circle-outline";
+                buttonText = "プラン作成に失敗しました";
+                buttonStyle = [styles.viewPlansButton, styles.errorButton];
+                textColor = 'red';
+                iconColor = 'red';
+                isDisabled = true;
                 break;
             default:
                 return null;
@@ -132,9 +178,43 @@ export default function ChatScreen({ navigation }) {
         );
     };
 
+    const renderStatusBanner = () => {
+        if (!planStatus || planStatus === 'not_started') return null;
+
+        const bannerBase = [styles.banner];
+        let text = '';
+        if (planStatus === 'in_progress') {
+            bannerBase.push({ backgroundColor: '#FFF4E5', borderColor: '#FFC78A' });
+            text = 'プランを作成しています。完了までお待ちください。';
+        } else if (planStatus === 'completed') {
+            bannerBase.push({ backgroundColor: '#E9FFF0', borderColor: '#86E3A5' });
+            text = 'プランが完成しました！';
+        } else if (planStatus === 'error') {
+            bannerBase.push({ backgroundColor: '#FFE9E9', borderColor: '#F5A3A3' });
+            text = 'プラン作成に失敗しました';
+        }
+
+        return (
+            <View style={bannerBase} accessibilityLiveRegion="polite" accessible>
+                <Text style={styles.bannerText}>{text}</Text>
+                {planStatus === 'completed' && (
+                    <TouchableOpacity
+                        accessibilityRole="button"
+                        onPress={() => navigation.navigate('SuggestedPlans')}
+                        style={styles.bannerButton}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={styles.bannerButtonText}>プランを見る</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        );
+    };
+
     return (
         <SafeAreaView style={styles.container}>
-            <ScrollView contentContainerStyle={styles.scrollContainer}>
+            <ScrollView contentContainerStyle={[styles.scrollContainer, { paddingBottom: bottomPadding }]}>
                 <View style={styles.characterContainer}>
                     <Image source={require('../assets/mana.png')} style={styles.characterImage} resizeMode="contain" />
                     <View style={styles.speechBubble}>
@@ -144,7 +224,7 @@ export default function ChatScreen({ navigation }) {
                         </TouchableOpacity>
                     </View>
                 </View>
-
+                {renderStatusBanner()}
                 <View style={styles.planningActionContainer}>
                     <TouchableOpacity style={styles.planningButton} onPress={() => navigation.navigate('Plan')}>
                         <Ionicons name="map-outline" size={24} color="white" />
@@ -202,6 +282,7 @@ const styles = StyleSheet.create({
     viewPlansButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F4F8', paddingVertical: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E0E0E0' },
     processingButton: { backgroundColor: '#E0E7FF' },
     completedButton: { backgroundColor: '#22C55E', borderColor: '#16A34A' },
+    errorButton: { backgroundColor: '#FFE9E9', borderColor: '#F5A3A3' },
     viewPlansButtonText: { fontSize: 18, fontWeight: 'bold' },
     characterContainer: { alignItems: 'center', paddingVertical: 10 },
     characterImage: { width: '70%', height: 200 },
@@ -229,4 +310,12 @@ const styles = StyleSheet.create({
     inputContainer: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderColor: '#ddd', padding: 8, backgroundColor: '#fff' },
     chatInput: { flex: 1, backgroundColor: '#fff', borderRadius: 22, paddingHorizontal: 15, paddingVertical: Platform.OS === 'ios' ? 12 : 8, fontSize: 16, maxHeight: 100 },
     sendButton: { marginLeft: 8, backgroundColor: '#6C63FF', borderRadius: 22, width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+    banner: { 
+        borderWidth: 1, borderRadius: 10, marginHorizontal: 16, marginTop: 8, marginBottom: 0,
+        paddingVertical: 10, paddingHorizontal: 12,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
+    },
+    bannerText: { fontSize: 13, color: '#333', marginRight: 8 },
+    bannerButton: { backgroundColor: '#FF6347', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+    bannerButtonText: { color: '#fff', fontWeight: '600', fontSize: 12 },
 });

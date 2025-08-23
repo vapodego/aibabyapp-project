@@ -1,3 +1,25 @@
+// --- Simple in-memory cache for fetches and Google search ---
+const _inMemoryCache = {};
+/**
+ * Get cached value if it exists and is fresh.
+ * @param {string} key
+ * @param {number} maxAgeMs
+ * @returns {any|null}
+ */
+function getCache(key, maxAgeMs) {
+  const entry = _inMemoryCache[key];
+  if (!entry) return null;
+  if ((Date.now() - entry.ts) > maxAgeMs) return null;
+  return entry.data;
+}
+/**
+ * Set cache value for a key.
+ * @param {string} key
+ * @param {any} data
+ */
+function setCache(key, data) {
+  _inMemoryCache[key] = { data, ts: Date.now() };
+}
 /****
  * weeklyPlannerUtils.js
  * 週次プランナー共通ユーティリティ（Firestore保存・HTMLレンダリング／検索・解析ツール）
@@ -7,6 +29,7 @@
 const admin = require("firebase-admin");
 const { JSDOM } = require('jsdom');
 const { FieldValue } = require("firebase-admin/firestore");
+const crypto = require('crypto');
 
 const cheerio = require('cheerio');
 let pLimitLib = require('p-limit');
@@ -38,6 +61,83 @@ function isExcludedDomain(url) {
   } catch (_) { return false; }
 }
 
+// ---- Firestore-backed caches (persistent) ----
+const CACHE_HTML_COL = 'cache_html';        // docId = sha1(url)             (7d TTL)
+const CACHE_SEARCH_COL = 'cache_search';    // docId = sha1({q,num,date})    (24h TTL)
+
+const sha1 = (x) => crypto.createHash('sha1').update(String(x)).digest('hex');
+
+// --- Analysis cache (LLMのページ鑑定結果を保存) -------------------
+const CACHE_ANALYSIS_COL = 'cache_analysis';
+
+/**
+ * URL + HTML内容 + モデル名 (+任意のプロンプト署名) で一意キーを作る
+ */
+function makeInspectorKey(url, html, model = 'gemini-1.5-flash-latest', promptSig = '') {
+  const contentHash = sha1(html || ''); // HTMLの内容でハッシュ
+  return sha1(`${url}::${contentHash}::${model}::${promptSig}`);
+}
+
+async function getAnalysisFromCache(url, html, { model = 'gemini-1.5-flash-latest', promptSig = '' } = {}) {
+  try {
+    const id = makeInspectorKey(url, html, model, promptSig);
+    const doc = await getCacheDoc(CACHE_ANALYSIS_COL, id);
+    if (doc && doc.value) {
+      logCacheHit('inspector', { url });
+      return doc.value; // LLMの解析JSONオブジェクトをそのまま返す
+    }
+  } catch (e) {
+    console.warn('[cache warn] getAnalysisFromCache failed', e && e.message ? e.message : e);
+    return null;
+  }
+  return null;
+}
+
+async function saveAnalysisToCache(url, html, analysis, { model = 'gemini-1.5-flash-latest', promptSig = '', ttlSec = 3 * 24 * 60 * 60 } = {}) {
+  try {
+    const id = makeInspectorKey(url, html, model, promptSig);
+    await setCacheDoc(CACHE_ANALYSIS_COL, id, {
+      value: analysis,
+      url,
+      model,
+      promptSig,
+      createdAt: Date.now(),
+      ttlSec
+    });
+    logCacheSave('inspector', { url });
+  } catch (e) {
+    console.warn('[cache warn] saveAnalysisToCache failed', e && e.message ? e.message : e);
+    return;
+  }
+}
+
+function logCacheHit(scope, info){
+  try { console.log(`[cache hit] ${scope}`, info || ''); }
+  catch (_) { return; }
+}
+function logCacheMiss(scope, info){
+  try { console.log(`[cache miss] ${scope}`, info || ''); }
+  catch (_) { return; }
+}
+function logCacheSave(scope, info){
+  try { console.log(`[cache save] ${scope}`, info || ''); }
+  catch (_) { return; }
+}
+
+async function getCacheDoc(col, id){
+  try {
+    const ref = admin.firestore().collection(col).doc(id);
+    const snap = await ref.get();
+    return snap.exists ? { id, ...snap.data() } : null;
+  } catch(e){ console.warn('[cache] get fail', col, id, e.message); return null; }
+}
+async function setCacheDoc(col, id, data){
+  try {
+    const ref = admin.firestore().collection(col).doc(id);
+    await ref.set({ ...data, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  } catch(e){ console.warn('[cache] set fail', col, id, e.message); }
+}
+
 // --- Concurrency control (p-limit) ---
 // "取得だけ" はネットワーク混雑・ブロック回避のため 1 並列に制限。
 // それ以外（軽〜中程度処理）は 2-3 並列に抑える。
@@ -64,31 +164,104 @@ async function fetchWithAbort(url, { timeoutMs = 6000, headers = {}, redirect = 
 }
 
 /**
- * HTMLを取得（5–6秒 + 1リトライ, UA/言語ヘッダ, 除外ドメインスキップ）
+ * HTMLを取得（5–6秒 + 1リトライ, UA/言語ヘッダ, 除外ドメインスキップ, Firestore-backed persistent cache）
  */
 async function toolGetHtmlContent(url, { minLength = 100 } = {}) {
+  // Check in-memory cache first (fast path, 7d)
+  const mem = getCache(url, 7 * 24 * 60 * 60 * 1000);
+  if (mem) return mem;
+
   return limitFetch(async () => {
     if (!url) return null;
-    if (isExcludedDomain(url)) {
-      console.warn(`[HTML] excluded domain skip: ${url}`);
-      return null;
-    }
+    if (isExcludedDomain(url)) { console.warn(`[HTML] excluded domain skip: ${url}`); return null; }
 
-    // 1st try (≈6s)
+    // Firestore persistent cache (7d)
+    const cacheId = sha1(url);
+    const cache = await getCacheDoc(CACHE_HTML_COL, cacheId);
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const recentEnough = cache?.fetchedAt && (now - cache.fetchedAt < sevenDaysMs);
+
+    let etag = cache?.etag || null;
+    let lastModified = cache?.lastModified || null;
+
+    const buildHeaders = () => {
+      const h = {};
+      if (etag) h['If-None-Match'] = etag;
+      if (lastModified) h['If-Modified-Since'] = new Date(lastModified).toUTCString();
+      return h;
+    };
+
+    if (!cache) logCacheMiss('html7d', { url });
+
+    // 1st try (≈6s) with conditional headers
     try {
-      const res = await fetchWithAbort(url, { timeoutMs: 6000 });
+      const res = await fetchWithAbort(url, { timeoutMs: 6000, headers: buildHeaders() });
+      if (res.status === 304 && cache?.body) {
+        console.log('[HTML cache] 304 hit', url);
+        logCacheHit('html7d-304', { url });
+        setCache(url, cache.body); // warm memory cache
+        return cache.body;
+      }
       if (!res.ok) return null;
       const text = await res.text();
-      return (text && text.trim().length >= minLength) ? text : null;
+      const body = (text && text.trim().length >= minLength) ? text : null;
+      if (body) {
+        // persist
+        await setCacheDoc(CACHE_HTML_COL, cacheId, {
+          url,
+          body,
+          etag: res.headers.get && res.headers.get('etag') || etag || null,
+          lastModified: res.headers.get && res.headers.get('last-modified') || lastModified || null,
+          fetchedAt: now,
+        });
+        logCacheSave('html7d', { url });
+        setCache(url, body);
+        return body;
+      }
+      return null;
     } catch (e1) {
-      // 2nd try with small backoff and slightly longer timeout (≈7.5s)
+      // 2nd try (≈7.5s)
       await new Promise(r => setTimeout(r, 400));
       try {
-        const res2 = await fetchWithAbort(url, { timeoutMs: 7500 });
+        const res2 = await fetchWithAbort(url, { timeoutMs: 7500, headers: buildHeaders() });
+        if (res2.status === 304 && cache?.body) {
+          console.log('[HTML cache] 304 hit (retry)', url);
+          logCacheHit('html7d-304', { url });
+          setCache(url, cache.body);
+          return cache.body;
+        }
         if (!res2.ok) return null;
         const text2 = await res2.text();
-        return (text2 && text2.trim().length >= minLength) ? text2 : null;
+        const body2 = (text2 && text2.trim().length >= minLength) ? text2 : null;
+        if (body2) {
+          await setCacheDoc(CACHE_HTML_COL, cacheId, {
+            url,
+            body: body2,
+            etag: res2.headers.get && res2.headers.get('etag') || etag || null,
+            lastModified: res2.headers.get && res2.headers.get('last-modified') || lastModified || null,
+            fetchedAt: Date.now(),
+          });
+          logCacheSave('html7d', { url });
+          setCache(url, body2);
+          return body2;
+        }
+        // fall back to stale cache if recent
+        if (recentEnough && cache?.body) {
+          console.log('[HTML cache] stale serve', url);
+          logCacheHit('html7d-stale', { url });
+          setCache(url, cache.body);
+          return cache.body;
+        }
+        return null;
       } catch (e2) {
+        // network failure -> stale cache if recent
+        if (recentEnough && cache?.body) {
+          console.log('[HTML cache] stale serve (network error)', url);
+          logCacheHit('html7d-stale', { url });
+          setCache(url, cache.body);
+          return cache.body;
+        }
         console.error(`> HTML取得ツールエラー (URL: ${url}):`, e2.type || e2.message || String(e2));
         return null;
       }
@@ -97,7 +270,7 @@ async function toolGetHtmlContent(url, { minLength = 100 } = {}) {
 }
 
 /**
- * Google Custom Search API を使ってWeb検索を実行
+ * Google Custom Search API を使ってWeb検索を実行 (Firestore-backed persistent cache: 24h)
  */
 async function toolGoogleSearch(query, num = 10) {
   if (!_secrets.googleApiKey || !_secrets.googleCx) {
@@ -108,14 +281,35 @@ async function toolGoogleSearch(query, num = 10) {
   const dateRestrict = 'm[1]';
   const fullQuery = `${query}`.trim();
 
+  // ---- Firestore cache (24h) for search results ----
+  const keyInfo = { q: fullQuery, num, dateRestrict };
+  const key = sha1(JSON.stringify(keyInfo));
+  const cachedDoc = await getCacheDoc(CACHE_SEARCH_COL, key);
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (cachedDoc?.items && cachedDoc?.cachedAt && (Date.now() - cachedDoc.cachedAt < dayMs)) {
+    logCacheHit('search24h', keyInfo);
+    setCache(`googleSearch:${fullQuery}:${num}`, cachedDoc.items); // warm mem cache
+    return cachedDoc.items;
+  }
+  logCacheMiss('search24h', keyInfo);
+
   console.log(`> [Google検索実行] クエリ: ${fullQuery}`);
+  // Use cache for search results (24h = 86400000 ms)
+  const cacheKey = `googleSearch:${fullQuery}:${num}`;
+  const cached = getCache(cacheKey, 24 * 60 * 60 * 1000);
+  if (cached) return cached;
+
   const url = `https://www.googleapis.com/customsearch/v1?key=${_secrets.googleApiKey}&cx=${_secrets.googleCx}&q=${encodeURIComponent(fullQuery)}&gl=jp&hl=ja&num=${num}&dateRestrict=${dateRestrict}`;
 
   try {
     const response = await fetch(url);
     const data = await response.json();
     if (data.error) throw new Error(JSON.stringify(data.error));
-    return data.items ? data.items.map((item) => ({ eventName: item.title, url: item.link })) : [];
+    const results = data.items ? data.items.map((item) => ({ eventName: item.title, url: item.link })) : [];
+    setCache(cacheKey, results); // in-memory
+    await setCacheDoc(CACHE_SEARCH_COL, key, { items: results, cachedAt: Date.now(), ...keyInfo });
+    logCacheSave('search24h', keyInfo);
+    return results;
   } catch (error) {
     console.error(`> Web検索ツールエラー (クエリ: ${query}):`, error);
     return [];
@@ -206,35 +400,80 @@ async function findBestImageForEvent(candidate, htmlContent, agentVisualScout) {
 }
 
 /**
- * Firestore にプラン配列を保存（全入替）
+ * Firestore にプラン配列を保存（全入替）＋ 実行履歴(planRuns)を残す
+ * @param {Array} plans                   生成した最終プラン配列
+ * @param {string} userId                 対象ユーザーID
+ * @param {Object} runMeta                任意の実行メタ情報（互換のため省略可）
+ * @param {string=} runMeta.runId         実行ID（未指定なら現在時刻を基に自動採番）
+ * @param {string=} runMeta.geofence      地理フィルタ（例: "横浜 OR 川崎 ..."）
+ * @param {Array<string>=} runMeta.interests  興味カテゴリ
+ * @param {string=} runMeta.transportMode 移動手段
+ * @param {number=} runMeta.maxResults    取得希望件数
+ * @param {Object=} runMeta.dateRange     日付レンジ
+ * @param {string=} runMeta.htmlPreviewUrl 手動実行プレビューUI(HTML)のURL
  */
-async function savePlansToFirestore(plans, userId) {
+async function savePlansToFirestore(plans, userId, runMeta = {}) {
   const db = admin.firestore();
   const userRef = db.collection("users").doc(userId);
-  const collectionRef = userRef.collection("suggestedPlans");
+  const suggestedCol = userRef.collection("suggestedPlans");
+  const runsCol = userRef.collection("planRuns");
 
-  // 既存削除
-  const snapshot = await collectionRef.get();
+  // runId を決定（未指定なら epoch ms を文字列で）
+  const runId = runMeta.runId || String(Date.now());
+
+  // 既存 suggestedPlans を全削除（重複回避）
+  const snapshot = await suggestedCol.get();
   if (!snapshot.empty) {
     const deleteBatch = db.batch();
     snapshot.docs.forEach((doc) => deleteBatch.delete(doc.ref));
     await deleteBatch.commit();
   }
 
-  // 追加
-  if (!plans || plans.length === 0) {
-    await userRef.set({ planGenerationStatus: 'completed' }, { merge: true });
-    return;
-  }
-
+  // 追加（各プランに runId を付与）
+  const planDocIds = [];
   const addBatch = db.batch();
-  plans.forEach((plan) => {
-    const planRef = collectionRef.doc();
-    addBatch.set(planRef, { ...plan, createdAt: FieldValue.serverTimestamp() });
+  const items = Array.isArray(plans) ? plans : [];
+  items.forEach((plan) => {
+    const docRef = suggestedCol.doc();
+    planDocIds.push(docRef.id);
+    addBatch.set(
+      docRef,
+      {
+        ...plan,
+        runId,
+        userId,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
   });
-  addBatch.set(userRef, { planGenerationStatus: 'completed' }, { merge: true });
+
+  // ステータス completed を先に同期
+  addBatch.set(userRef, { planGenerationStatus: 'completed', lastPlanRunId: runId }, { merge: true });
+
+  // 実行履歴(planRuns) を記録（後から一覧表示に使う）
+  const runDocRef = runsCol.doc(runId);
+  addBatch.set(
+    runDocRef,
+    {
+      runId,
+      createdAt: FieldValue.serverTimestamp(),
+      planCount: items.length,
+      interests: Array.isArray(runMeta.interests) ? runMeta.interests : [],
+      geofence: runMeta.geofence || null,
+      transportMode: runMeta.transportMode || null,
+      maxResults: Number.isFinite(runMeta.maxResults) ? runMeta.maxResults : null,
+      dateRange: runMeta.dateRange || null,
+      htmlPreviewUrl: runMeta.htmlPreviewUrl || null,
+      suggestedPlansPath: suggestedCol.path,
+      suggestedPlanDocIds: planDocIds,
+    },
+    { merge: true }
+  );
 
   await addBatch.commit();
+  console.log('[savePlansToFirestore] wrote', items.length, 'plans for', userId, 'runId=', runId);
 }
 
 /**
@@ -279,7 +518,7 @@ function generateHtmlResponse(plans, categorizedAlternatives, userId, location, 
   if (categorizedAlternatives && categorizedAlternatives.length > 0) {
     alternativesHtml = `<div class="mt-16"><h2 class="text-3xl font-bold text-gray-800 text-center mb-8">その他のご提案</h2><div class="space-y-8">`;
     categorizedAlternatives.forEach((category) => {
-      alternativesHtml += `<div class="bg-white rounded-2xl shadow-lg p-6"><h3 class="text-2xl font-bold text-gray-700 mb-4">${category.category_title}</h3><ul class="list-disc list-inside space-y-2">`;
+      alternativesHtml += `<div class="bg白 rounded-2xl shadow-lg p-6"><h3 class="text-2xl font-bold text-gray-700 mb-4">${category.category_title}</h3><ul class="list-disc list-inside space-y-2">`;
       category.events.forEach((event) => {
         alternativesHtml += `<li class="text-gray-600"><a href="${event.url}" target="_blank" rel="noopener noreferrer" class="text-teal-600 hover:underline">${event.eventName}</a></li>`;
       });
@@ -319,4 +558,9 @@ module.exports = {
   limitFetch,
   limitHeavy,
   setSecrets,
+  getAnalysisFromCache,
+  saveAnalysisToCache,
+  // For testing/debugging, optionally expose cache helpers:
+  // getCache, setCache,
+  // getCacheDoc, setCacheDoc, // (uncomment for debugging)
 };

@@ -1,11 +1,3 @@
-/**
- * =================================================================
- * index.js - Cloud Functions エントリーポイント (v2対応版)
- * =================================================================
- * - 各モジュールは require を遅延ロードして、起動時エラーを回避
- * - CORS と preflight(OPTIONS) を統一処理
- */
-
 const { setGlobalOptions, https } = require("firebase-functions/v2");
 const { defineSecret } = require("firebase-functions/params");
 
@@ -28,6 +20,11 @@ try {
 const GOOGLE_API_KEY = defineSecret("GOOGLE_API_KEY");
 const GOOGLE_CSE_ID = defineSecret("GOOGLE_CSE_ID");
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+
+// Expose callable endpoint (v2) defined in weeklyPlanner.js
+const weeklyPlanner = require("./weeklyPlanner");
+exports.generatePlansOnCall = weeklyPlanner.generatePlansOnCall;
+exports.generatePlansOnRequest = weeklyPlanner.generatePlansOnRequest;
 
 // ---------------------------------------------------------------
 // CORS ユーティリティ
@@ -78,7 +75,7 @@ exports.ping = https.onRequest({ timeoutSeconds: 30 }, withCors(async (req, res)
 // WeeklyPlanner bridges
 // ---------------------------------------------------------------
 exports.runWeeklyPlansManually = https.onRequest({
-  timeoutSeconds: 120,
+  timeoutSeconds: 3600,
   secrets: [GEMINI_API_KEY, GOOGLE_API_KEY, GOOGLE_CSE_ID],
 }, withCors(async (req, res) => {
   console.log('[diag] env.GEMINI_API_KEY exists?', !!process.env.GEMINI_API_KEY);

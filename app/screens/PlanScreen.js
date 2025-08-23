@@ -19,6 +19,64 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
+// ---- Cloud Functions Gen2 (onRequest) direct endpoints ----
+// プロジェクト/リージョンに合わせて必要なら置き換えてください
+const FUNCTIONS_BASE = 'https://asia-northeast1-aibabyapp-abeae.cloudfunctions.net';
+const RUN_WEEKLY_PLANS_URL = `${FUNCTIONS_BASE}/runWeeklyPlansManually`;
+
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { ...opts, signal: controller.signal, headers: { 'Cache-Control': 'no-cache', ...(opts.headers || {}) } });
+        return res;
+    } finally {
+        clearTimeout(id);
+    }
+}
+
+/**
+ * 週次プラン生成の呼び出し
+ * 1) callable(generatePlansOnCall) をリージョン固定で試す
+ * 2) 失敗したら onRequest (HTTP) へフォールバック
+ */
+async function callGeneratePlans(userId, payloadForCallable) {
+    // 1) callable を試す（存在しない/リージョン違いなら例外→フォールバック）
+    try {
+        const functions = getFunctions(getApp(), 'asia-northeast1');
+        const generatePlansOnCall = httpsCallable(functions, 'generatePlansOnCall');
+        const res = await generatePlansOnCall(payloadForCallable);
+        return { ok: true, via: 'callable', data: res?.data };
+    } catch (e) {
+        const diag = {
+            where: 'httpsCallable(generatePlansOnCall)',
+            code: e?.code || null,
+            name: e?.name || null,
+            message: e?.message || String(e),
+            details: e?.details || null,
+            stack: e?.stack ? String(e.stack).split('\n').slice(0, 3) : null,
+        };
+        console.warn('callable失敗→HTTP(onRequest)へフォールバック (diag):', diag);
+    }
+
+    // 2) onRequest (Functions v2, HTTP) を叩く（ユーザーIDのみで実行、サーバ側でFirestore参照）
+    const qs = new URLSearchParams({ ui: 'json', userId }).toString();
+    const url = `${RUN_WEEKLY_PLANS_URL}?${qs}`;
+    console.log('[PlanScreen] onRequest fallback → GET', { url, userId, timeoutMs: 15000 });
+    const resp = await fetchWithTimeout(url, { method: 'GET' }, 15000);
+    if (!resp.ok) {
+        let bodyText = '';
+        try { bodyText = await resp.text(); } catch (_) { /* noop */ }
+        const err = new Error(`Functions fetch failed: ${resp.status} ${resp.statusText || ''} ${bodyText ? ':: ' + bodyText.slice(0, 300) : ''}`);
+        err.status = resp.status;
+        err.statusText = resp.statusText;
+        err.body = bodyText;
+        throw err;
+    }
+    const json = await resp.json();
+    return { ok: true, via: 'fetch', data: json };
+}
+
 // --- ヘルパー関数 ---
 const formatDate = (date) => {
     if (!date) return '';
@@ -93,25 +151,73 @@ const PlanScreen = ({ navigation }) => {
                 }
             };
 
-            console.log(`プラン生成をリクエスト:`, payload);
+            const __t0 = Date.now();
+            console.log('[PlanScreen] プラン生成をリクエスト', {
+                uid: user.uid,
+                region: 'asia-northeast1',
+                via: 'callable→fallback(onRequest)',
+                payload,
+            });
 
-            // ▼▼▼【修正点】コメントアウトを解除し、新しいpayloadを送信 ▼▼▼
-            const result = await generatePlansProduction(payload);
+            // ▼▼▼ callable優先＋Cloud Runフォールバック ▼▼▼
+            const result = await callGeneratePlans(user.uid, payload);
+            console.log('[PlanScreen] generatePlans trigger duration(ms):', Date.now() - __t0);
+            console.log('[PlanScreen] trigger result', { via: result.via, status: result?.data?.status, data: result.data });
 
-            if (result.data.status === 'processing_started') {
-                Alert.alert(
-                    '受付完了',
-                    'プランの生成を開始しました。完了次第、ホーム画面でお知らせします。',
-                    [{ text: 'ホームに戻る', onPress: () => navigation.goBack() }]
-                );
-                setStatus('idle');
+            if (result.via === 'callable') {
+                const st = result?.data?.status;
+                console.log('[PlanScreen] callable returned status:', st);
+                if (st === 'completed') {
+                    Alert.alert(
+                        '作成完了',
+                        '提案プランを保存しました。画面を閉じて「提案」タブをご確認ください。',
+                        [{ text: '提案を見る', onPress: () => navigation.navigate('SuggestedPlans') }]
+                    );
+                    setStatus('idle');
+                } else if (st === 'processing_started') {
+                    Alert.alert(
+                        '受付完了',
+                        'プランの生成を開始しました。完了次第、ホーム画面でお知らせします。',
+                        [{ text: 'ホームに戻る', onPress: () => navigation.goBack() }]
+                    );
+                    setStatus('idle');
+                } else {
+                    console.warn('[PlanScreen] callable unexpected status:', st, result?.data);
+                    throw new Error(result?.data?.message || 'プラン生成のリクエストに失敗しました。');
+                }
             } else {
-                throw new Error(result.data.message || 'プラン生成のリクエストに失敗しました。');
+                // Cloud Run（onRequest）経由の場合、同期完了(200/completed)か、受付(202)のどちらもあり得る
+                const st = result?.data?.status;
+                console.log('[PlanScreen] onRequest returned status:', st);
+                if (st === 'completed') {
+                    Alert.alert(
+                        '作成完了',
+                        '提案プランを保存しました。画面を閉じて「提案」タブをご確認ください。',
+                        [{ text: '提案を見る', onPress: () => navigation.navigate('SuggestedPlans') }]
+                    );
+                } else {
+                    Alert.alert(
+                        '受付完了',
+                        'プランの作成を開始しました。完了すると「提案」に表示されます。',
+                        [{ text: 'ホームに戻る', onPress: () => navigation.goBack() }]
+                    );
+                }
+                setStatus('idle');
             }
 
         } catch (err) {
             console.error("Firebase Functionsの呼び出しに失敗しました:", err);
-            setError(err.message);
+            const msg = `${err.name || 'Error'}${err.code ? ` (${err.code})` : ''}: ${err.message || String(err)}`;
+            setError(msg);
+            console.log('[PlanScreen] handleSearchPlans error detail:', err);
+            console.log('[PlanScreen] normalized error diag:', {
+                name: err?.name || null,
+                code: err?.code || null,
+                message: err?.message || String(err),
+                status: err?.status || null,
+                statusText: err?.statusText || null,
+                body: err?.body ? String(err.body).slice(0, 300) : null,
+            });
             setStatus('error');
         }
     };

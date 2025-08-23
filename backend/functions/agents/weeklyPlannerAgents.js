@@ -9,6 +9,7 @@
  */
 
 const { callGenerativeAi, toolGetHtmlContent } = require('../utils');
+const { getAnalysisFromCache, saveAnalysisToCache } = require('../utils/weeklyPlannerUtils');
 const _pLimit = require('p-limit');
 const pLimit = _pLimit.default || _pLimit; // ESM/CJS 両対応
 const limitFetch = pLimit(1);   // HTML取得は外向きスパイクを防ぐため1
@@ -52,6 +53,13 @@ async function agentBroadEventSearcher(searchArea, singleInterest) {
 
 
 async function agentInspector(url, htmlContent, userData) {
+    const modelUsed = 'gemini-1.5-flash-latest';
+    const PROMPT_SIG = 'v1-inspector-20250821';
+    if (htmlContent) {
+      const cached = await getAnalysisFromCache(url, htmlContent, { model: modelUsed, promptSig: PROMPT_SIG });
+      if (cached) return cached;
+    }
+
     const today = new Date();
     const oneMonthFromNow = new Date(today);
     oneMonthFromNow.setMonth(today.getMonth() + 1);
@@ -87,7 +95,11 @@ ${htmlContent.substring(0, 15000)}
 #   {"isValid": true, "isMatch": false, "reason": "イベントの日付がターゲット期間外です。" or "イベントの種類がユーザーの興味と一致しません。"}
 # - 「リストページ」または「無関係」の場合:
 #   {"isValid": false, "isMatch": false, "isListPage": true or false}`;
-    return await callGenerativeAi(prompt, true, "gemini-1.5-flash-latest");
+    const result = await callGenerativeAi(prompt, true, modelUsed);
+    if (htmlContent && result) {
+      await saveAnalysisToCache(url, htmlContent, result, { model: modelUsed, promptSig: PROMPT_SIG, ttlSec: 3 * 24 * 60 * 60 });
+    }
+    return result;
 }
 
 async function agentListPageAnalyzer(urls) {

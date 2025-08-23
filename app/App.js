@@ -15,6 +15,7 @@ import PlanScreen from './screens/PlanScreen';
 import SuggestedPlansScreen from './screens/SuggestedPlansScreen';
 import DayPlanScreen from './screens/DayPlanScreen'; 
 import SettingsScreen from './screens/SettingsScreen'; // ◀◀◀ 本物の設定画面をインポート
+// import PlanHistoryScreen from './screens/PlanHistoryScreen'; // ← 将来は専用ファイルに差し替え
 
 // Utilities & Firebase
 import { loadInitialRecords } from './utils/loadInitialRecords';
@@ -49,6 +50,13 @@ Notifications.setNotificationHandler({
 
 // --- Push Token Helper Function (変更なし) ---
 async function registerForPushNotificationsAsync() { /* ... */ }
+
+// --- 仮の履歴画面コンポーネント（将来は専用ファイルに差し替え） ---
+const PlanHistoryScreen = () => (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Text>履歴画面（準備中）</Text>
+    </View>
+);
 
 // --- タブナビゲーターを持つコンポーネントを定義 ---
 function MainTabNavigator() {
@@ -139,6 +147,7 @@ export default function App() {
                 <Stack.Screen name="Plan" component={PlanScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="SuggestedPlans" component={SuggestedPlansScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="DayPlan" component={DayPlanScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="PlanHistory" component={PlanHistoryScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
          </SafeAreaProvider>

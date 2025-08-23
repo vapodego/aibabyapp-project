@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@google-cloud/tasks": "^6.2.0"
+  }
+}
