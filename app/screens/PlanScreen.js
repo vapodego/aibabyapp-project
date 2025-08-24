@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp } from 'firebase/app';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 // ---- Cloud Functions Gen2 (onRequest) direct endpoints ----
@@ -105,6 +105,23 @@ const PlanScreen = ({ navigation }) => {
 
     const [status, setStatus] = useState('idle');
     const [error, setError] = useState(null);
+
+    // --- 認証状態監視: ユーザーがサインインしていなければ匿名サインイン ---
+    useEffect(() => {
+        const auth = getAuth();
+        const unsub = onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                try {
+                    await signInAnonymously(auth);
+                } catch (e) {
+                    console.warn('[PlanScreen] anonymous sign-in failed:', e);
+                }
+            } else {
+                console.log('[PlanScreen] signed in uid:', user.uid);
+            }
+        });
+        return () => unsub && unsub();
+    }, []);
 
     // --- データ読み込み ---
     useEffect(() => {

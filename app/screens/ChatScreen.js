@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 
+
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -135,48 +136,6 @@ export default function ChatScreen({ navigation }) {
         setTimeout(() => setChatHistory(prev => [...prev, newBotMessage]), 500);
     };
     
-    // --- レンダリング ---
-    const renderPlanButton = () => {
-        if (!planStatus || planStatus === 'not_started' || planStatus === 'in_progress' || planStatus === 'completed') {
-            return null;
-        }
-
-        let iconName, buttonText, buttonStyle, textColor, iconColor, isDisabled = false, showActivityIndicator = false;
-
-        switch (planStatus) {
-            case 'in_progress':
-                iconName = "hourglass-outline";
-                buttonText = "プランを作成中です...";
-                buttonStyle = [styles.viewPlansButton, styles.processingButton];
-                isDisabled = true;
-                showActivityIndicator = true;
-                break;
-            case 'completed':
-                iconName = "sparkles-outline";
-                buttonText = "プランが完成しました！";
-                buttonStyle = [styles.viewPlansButton, styles.completedButton];
-                textColor = 'white';
-                iconColor = 'white';
-                break;
-            case 'error':
-                iconName = "alert-circle-outline";
-                buttonText = "プラン作成に失敗しました";
-                buttonStyle = [styles.viewPlansButton, styles.errorButton];
-                textColor = 'red';
-                iconColor = 'red';
-                isDisabled = true;
-                break;
-            default:
-                return null;
-        }
-
-        return (
-            <TouchableOpacity style={buttonStyle} onPress={() => navigation.navigate('SuggestedPlans')} disabled={isDisabled}>
-                {showActivityIndicator ? <ActivityIndicator color="#6C63FF" style={{ marginRight: 12 }}/> : <Ionicons name={iconName} size={24} color={iconColor} style={{ marginRight: 12 }} />}
-                <Text style={[styles.viewPlansButtonText, { color: textColor }]}>{buttonText}</Text>
-            </TouchableOpacity>
-        );
-    };
 
     const renderStatusBanner = () => {
         if (!planStatus || planStatus === 'not_started') return null;
@@ -189,6 +148,23 @@ export default function ChatScreen({ navigation }) {
         } else if (planStatus === 'completed') {
             bannerBase.push({ backgroundColor: '#E9FFF0', borderColor: '#86E3A5' });
             text = 'プランが完成しました！';
+            // Re-add the small button for completed status
+            return (
+                <View style={bannerBase} accessibilityLiveRegion="polite" accessible>
+                    <Text style={styles.bannerText}>{text}</Text>
+                    {planStatus === 'completed' && (
+                        <TouchableOpacity
+                            accessibilityRole="button"
+                            onPress={() => navigation.navigate('SuggestedPlans')}
+                            style={styles.bannerButton}
+                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            activeOpacity={0.7}
+                        >
+                            <Text style={styles.bannerButtonText}>プランを見る</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            );
         } else if (planStatus === 'error') {
             bannerBase.push({ backgroundColor: '#FFE9E9', borderColor: '#F5A3A3' });
             text = 'プラン作成に失敗しました';
@@ -197,17 +173,6 @@ export default function ChatScreen({ navigation }) {
         return (
             <View style={bannerBase} accessibilityLiveRegion="polite" accessible>
                 <Text style={styles.bannerText}>{text}</Text>
-                {planStatus === 'completed' && (
-                    <TouchableOpacity
-                        accessibilityRole="button"
-                        onPress={() => navigation.navigate('SuggestedPlans')}
-                        style={styles.bannerButton}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        activeOpacity={0.7}
-                    >
-                        <Text style={styles.bannerButtonText}>プランを見る</Text>
-                    </TouchableOpacity>
-                )}
             </View>
         );
     };
@@ -230,7 +195,6 @@ export default function ChatScreen({ navigation }) {
                         <Ionicons name="map-outline" size={24} color="white" />
                         <Text style={styles.planningButtonText}>AIとお出かけプランをたてる</Text>
                     </TouchableOpacity>
-                     {renderPlanButton()}
                 </View>
 
                 <View style={styles.suggestionSection}>
@@ -254,8 +218,7 @@ export default function ChatScreen({ navigation }) {
                     </View>
                 </View>
             </ScrollView>
-            
-            {/* フッターとモーダルは削除 */}
+
 
             <Modal visible={isChatModalVisible} onRequestClose={() => setIsChatModalVisible(false)} transparent={true} animationType="slide">
                 <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>

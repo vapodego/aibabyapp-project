@@ -8,6 +8,7 @@ const FooterNav = ({ navigation, onSettingsPress }) => {
     const state = navigation?.getState?.();
     const currentRoute = state?.routes?.[state?.index || 0]?.name;
 
+    // Tab Navigator のスクリーン名と合わせる（App.js: HomeTab / RecordTab / SuggestedTab / SettingsTab）
     const isActive = (name) => currentRoute === name;
     const activeColor = '#FF6347';
     const inactiveColor = '#888';
@@ -26,53 +27,53 @@ const FooterNav = ({ navigation, onSettingsPress }) => {
             {/* ホーム */}
             <TouchableOpacity
                 style={styles.navButton}
-                onPress={() => navigation.navigate('Chat')}
+                onPress={() => navigation.navigate('HomeTab')}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: isActive('Chat') }}
+                accessibilityState={{ selected: isActive('HomeTab') }}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 activeOpacity={0.7}
             >
-                <Ionicons name={isActive('Chat') ? 'home' : 'home-outline'} size={24} color={isActive('Chat') ? activeColor : inactiveColor} />
-                <Text style={[styles.navText, { color: isActive('Chat') ? activeColor : inactiveColor }]}>ホーム</Text>
+                <Ionicons name={isActive('HomeTab') ? 'home' : 'home-outline'} size={24} color={isActive('HomeTab') ? activeColor : inactiveColor} />
+                <Text style={[styles.navText, { color: isActive('HomeTab') ? activeColor : inactiveColor }]}>ホーム</Text>
             </TouchableOpacity>
 
             {/* 記録 */}
             <TouchableOpacity
                 style={styles.navButton}
-                onPress={() => navigation.navigate('Record')}
+                onPress={() => navigation.navigate('RecordTab')}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: isActive('Record') }}
+                accessibilityState={{ selected: isActive('RecordTab') }}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 activeOpacity={0.7}
             >
-                <Ionicons name={isActive('Record') ? 'create' : 'create-outline'} size={24} color={isActive('Record') ? activeColor : inactiveColor} />
-                <Text style={[styles.navText, { color: isActive('Record') ? activeColor : inactiveColor }]}>記録する</Text>
+                <Ionicons name={isActive('RecordTab') ? 'create' : 'create-outline'} size={24} color={isActive('RecordTab') ? activeColor : inactiveColor} />
+                <Text style={[styles.navText, { color: isActive('RecordTab') ? activeColor : inactiveColor }]}>記録する</Text>
             </TouchableOpacity>
 
-            {/* 履歴 */}
+            {/* 提案 */}
             <TouchableOpacity
                 style={styles.navButton}
-                onPress={() => navigation.navigate('PlanHistory')}
+                onPress={() => navigation.navigate('SuggestedTab')}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: isActive('PlanHistory') }}
+                accessibilityState={{ selected: isActive('SuggestedTab') }}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 activeOpacity={0.7}
             >
-                <Ionicons name={isActive('PlanHistory') ? 'time' : 'time-outline'} size={24} color={isActive('PlanHistory') ? activeColor : inactiveColor} />
-                <Text style={[styles.navText, { color: isActive('PlanHistory') ? activeColor : inactiveColor }]}>履歴</Text>
+                <Ionicons name={isActive('SuggestedTab') ? 'star' : 'star-outline'} size={24} color={isActive('SuggestedTab') ? activeColor : inactiveColor} />
+                <Text style={[styles.navText, { color: isActive('SuggestedTab') ? activeColor : inactiveColor }]}>提案</Text>
             </TouchableOpacity>
 
             {/* 設定 */}
             <TouchableOpacity
                 style={styles.navButton}
-                onPress={onSettingsPress || (() => navigation.navigate('Settings'))}
+                onPress={onSettingsPress || (() => navigation.navigate('SettingsTab'))}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: isActive('Settings') }}
+                accessibilityState={{ selected: isActive('SettingsTab') }}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 activeOpacity={0.7}
             >
-                <Ionicons name={isActive('Settings') ? 'settings' : 'settings-outline'} size={24} color={isActive('Settings') ? activeColor : inactiveColor} />
-                <Text style={[styles.navText, { color: isActive('Settings') ? activeColor : inactiveColor }]}>設定</Text>
+                <Ionicons name={isActive('SettingsTab') ? 'settings' : 'settings-outline'} size={24} color={isActive('SettingsTab') ? activeColor : inactiveColor} />
+                <Text style={[styles.navText, { color: isActive('SettingsTab') ? activeColor : inactiveColor }]}>設定</Text>
             </TouchableOpacity>
         </View>
     );

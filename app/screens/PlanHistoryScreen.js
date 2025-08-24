@@ -1,17 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Linking } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { getAuth } from 'firebase/auth';
 
 // ★ Cloud Functions Gen2: getPlanHistory エンドポイント
-//   必要に応じて projectId / region / userId を環境に合わせて変更してください。
+//   必要に応じて projectId / region を環境に合わせて変更してください。
 const REGION = 'asia-northeast1';
 const PROJECT_ID = 'aibabyapp-abeae';
-const DEFAULT_USER_ID = 'oKLePECeqeQcGX16ytHo8vtlfaJ3'; // 認証導入前のテストUID
 
 const CF_HISTORY_URL = (userId) =>
   `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/getPlanHistory?userId=${encodeURIComponent(userId)}`;
 
 export default function PlanHistoryScreen() {
+  const navigation = useNavigation();
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -20,7 +21,14 @@ export default function PlanHistoryScreen() {
   const fetchHistory = async () => {
     setErrorMsg('');
     try {
-      const resp = await fetch(CF_HISTORY_URL(DEFAULT_USER_ID), { method: 'GET' });
+      // 認証中のユーザーを優先（未ログインならフォールバックを許容）
+      const auth = getAuth();
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        throw new Error('ユーザーが未ログインです。');
+      }
+
+      const resp = await fetch(CF_HISTORY_URL(uid), { method: 'GET' });
       if (!resp.ok) {
         const t = await resp.text().catch(() => '');
         throw new Error(`HTTP ${resp.status}: ${t || 'unknown error'}`);
@@ -28,17 +36,13 @@ export default function PlanHistoryScreen() {
       const json = await resp.json();
       const list = Array.isArray(json?.history) ? json.history : [];
 
-      // createdAt 降順に並べ替え（Firestore Timestamp も ISO 文字列も考慮）
-      list.sort((a, b) => {
-        const ta = tsToMs(a?.createdAt);
-        const tb = tsToMs(b?.createdAt);
-        return tb - ta;
-      });
-
+      // createdAt 降順に並べ替え（Firestore Timestamp / ISO / number に対応）
+      list.sort((a, b) => tsToMs(b?.createdAt) - tsToMs(a?.createdAt));
       setPlans(list);
     } catch (e) {
       console.error('[PlanHistoryScreen] fetch error', e);
-      setErrorMsg('履歴の取得に失敗しました。時間をおいて再度お試しください。');
+      setErrorMsg('履歴の取得に失敗しました。ログイン状態やネットワークをご確認ください。');
+      setPlans([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -68,18 +72,19 @@ export default function PlanHistoryScreen() {
         console.warn('Failed to open previewUrl', e);
       }
     }
-    // 予備: SuggestedPlans 画面にナビゲートする場合は、必要なパラメータをバックエンドが返せるように拡張してください
-    // navigation.navigate('SuggestedPlans', { userId: DEFAULT_USER_ID, planId: item.planId });
   };
 
   const renderItem = ({ item }) => {
     const createdAtMs = tsToMs(item?.createdAt);
     const createdAtText = createdAtMs ? new Date(createdAtMs).toLocaleString() : '日時不明';
 
+    // 行全体をタップで、その runId の提案一覧へ遷移
+    const goToRun = () => navigation.navigate('SuggestedPlans', { runId: item.runId || item.id });
+
     return (
-      <View style={styles.itemContainer}>
+      <TouchableOpacity style={styles.itemContainer} onPress={goToRun} accessibilityRole="button">
         <Text style={styles.itemDate}>{createdAtText}</Text>
-        <Text style={styles.itemMeta}>
+        <Text style={styles.itemMeta} numberOfLines={2}>
           条件: {Array.isArray(item?.interests) ? item.interests.join(', ') : 'なし'}
           {item?.area ? ` / エリア: ${item.area}` : ''}
           {item?.maxResults ? ` / 最大件数: ${item.maxResults}` : ''}
@@ -89,14 +94,17 @@ export default function PlanHistoryScreen() {
         )}
         <Text style={[styles.badge, badgeColor(item.status)]}>{statusLabel(item.status)}</Text>
 
-        <TouchableOpacity
-          onPress={() => openPreview(item)}
-          accessibilityRole="button"
-          style={styles.linkBtn}
-        >
-          <Text style={styles.linkText}>詳細を見る</Text>
-        </TouchableOpacity>
-      </View>
+        {/* プレビューがある場合のみ副作用ボタンを表示 */}
+        {item?.previewUrl ? (
+          <TouchableOpacity
+            onPress={(e) => { e.stopPropagation(); openPreview(item); }}
+            accessibilityRole="button"
+            style={styles.linkBtn}
+          >
+            <Text style={styles.linkText}>プレビューを開く</Text>
+          </TouchableOpacity>
+        ) : null}
+      </TouchableOpacity>
     );
   };
 
@@ -116,12 +124,10 @@ export default function PlanHistoryScreen() {
           )}
           <FlatList
             data={plans}
-            keyExtractor={(item, idx) => item?.runId || String(idx)}
+            keyExtractor={(item, idx) => item?.runId || item?.id || String(idx)}
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-            }
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             ListEmptyComponent={
               <View style={styles.centerBox}>
                 <Text style={styles.centerText}>履歴がありません</Text>

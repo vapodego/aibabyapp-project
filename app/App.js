@@ -15,7 +15,7 @@ import PlanScreen from './screens/PlanScreen';
 import SuggestedPlansScreen from './screens/SuggestedPlansScreen';
 import DayPlanScreen from './screens/DayPlanScreen'; 
 import SettingsScreen from './screens/SettingsScreen'; // ◀◀◀ 本物の設定画面をインポート
-// import PlanHistoryScreen from './screens/PlanHistoryScreen'; // ← 将来は専用ファイルに差し替え
+import PlanHistoryScreen from './screens/PlanHistoryScreen'; // ← 将来は専用ファイルに差し替え
 
 // Utilities & Firebase
 import { loadInitialRecords } from './utils/loadInitialRecords';
@@ -51,13 +51,6 @@ Notifications.setNotificationHandler({
 // --- Push Token Helper Function (変更なし) ---
 async function registerForPushNotificationsAsync() { /* ... */ }
 
-// --- 仮の履歴画面コンポーネント（将来は専用ファイルに差し替え） ---
-const PlanHistoryScreen = () => (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-      <Text>履歴画面（準備中）</Text>
-    </View>
-);
-
 // --- タブナビゲーターを持つコンポーネントを定義 ---
 function MainTabNavigator() {
   // ▼▼▼【修正点】仮の設定画面コンポーネントを削除 ▼▼▼
@@ -80,6 +73,8 @@ function MainTabNavigator() {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'RecordTab') {
             iconName = focused ? 'calendar' : 'calendar-outline';
+          } else if (route.name === 'SuggestedTab') {
+            iconName = focused ? 'star' : 'star-outline';
           } else if (route.name === 'SettingsTab') {
             iconName = focused ? 'settings' : 'settings-outline';
           }
@@ -95,6 +90,7 @@ function MainTabNavigator() {
     >
       <Tab.Screen name="HomeTab" component={ChatScreen} options={{ title: 'ホーム' }} />
       <Tab.Screen name="RecordTab" component={RecordScreen} options={{ title: '記録' }} />
+      <Tab.Screen name="SuggestedTab" component={SuggestedPlansScreen} options={{ title: '提案' }} />
       {/* ▼▼▼【修正点】componentをインポートしたSettingsScreenに変更 ▼▼▼ */}
       <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: '設定' }} />
     </Tab.Navigator>
@@ -106,6 +102,13 @@ export default function App() {
     const [userId, setUserId] = useState(null);
     const notificationListener = useRef();
     const responseListener = useRef();
+
+    useEffect(() => {
+      // まだ未ログインなら匿名サインインして Firestore ルールを満たす
+      if (!auth.currentUser) {
+        signInAnonymously(auth).catch((e) => console.warn('[App] anonymous sign-in failed:', e));
+      }
+    }, []);
  
     useEffect(() => {
     if (Platform.OS === 'android') {

@@ -756,6 +756,49 @@ exports.getPlanStatus = https.onRequest(
 );
 
 /**
+ * 保存済みプラン取得API
+ * GET /getSuggestedPlans?userId=...&runId=...(optional)
+ *  - runId 未指定なら最新の planRuns から読み込む
+ * Response: { runId, plans: Plan[] }
+ */
+exports.getSuggestedPlans = https.onRequest(
+  { timeoutSeconds: 60, memory: "256MiB", secrets: [GOOGLE_API_KEY, GOOGLE_CSE_ID, GEMINI_API_KEY] },
+  async (req, res) => {
+    try {
+      const userId = (req.query.userId || "test-user-01").toString();
+      let runId = req.query.runId ? req.query.runId.toString() : null;
+      const db = admin.firestore();
+      const userRef = db.collection('users').doc(userId);
+
+      if (!runId) {
+        const runsSnap = await userRef.collection('planRuns')
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+        runId = runsSnap.docs[0]?.id || null;
+      }
+
+      let plans = [];
+      if (runId) {
+        const colRef = userRef.collection('planRuns').doc(runId).collection('suggestedPlans');
+        const snap = await colRef.get();
+        plans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      } else {
+        // フォールバック：ルートの suggestedPlans
+        const snap = await userRef.collection('suggestedPlans').get();
+        plans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      }
+
+      res.set('Cache-Control', 'no-store');
+      return res.status(200).json({ runId, plans });
+    } catch (e) {
+      console.error('[getSuggestedPlans エラー]', e);
+      return res.status(500).json({ error: e && e.message ? e.message : String(e) });
+    }
+  }
+);
+
+/**
  * 履歴取得API: 直近の planRuns を返す
  * GET /getPlanHistory?userId=...
  * Response: { history: PlanRun[] }
