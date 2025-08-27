@@ -1,0 +1,27 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 公開記事（誰でも読み取り可・書き込みはFunctionsのみ）
+    match /articles/{articleId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ユーザー専用データ
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // 記事配信・既読管理
+      match /articleFeeds/{feedId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // その他のユーザーデータ（SuggestedPlansなども含む）
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

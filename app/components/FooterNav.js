@@ -8,7 +8,7 @@ const FooterNav = ({ navigation, onSettingsPress }) => {
     const state = navigation?.getState?.();
     const currentRoute = state?.routes?.[state?.index || 0]?.name;
 
-    // Tab Navigator のスクリーン名と合わせる（App.js: HomeTab / RecordTab / SuggestedTab / SettingsTab）
+    // Tab Navigator のスクリーン名と合わせる（App.js: HomeTab / RecordTab / SuggestedTab / ArticleHub / SettingsTab）
     const isActive = (name) => currentRoute === name;
     const activeColor = '#FF6347';
     const inactiveColor = '#888';
@@ -61,6 +61,19 @@ const FooterNav = ({ navigation, onSettingsPress }) => {
             >
                 <Ionicons name={isActive('SuggestedTab') ? 'star' : 'star-outline'} size={24} color={isActive('SuggestedTab') ? activeColor : inactiveColor} />
                 <Text style={[styles.navText, { color: isActive('SuggestedTab') ? activeColor : inactiveColor }]}>提案</Text>
+            </TouchableOpacity>
+
+            {/* 月齢記事 */}
+            <TouchableOpacity
+                style={styles.navButton}
+                onPress={() => navigation.navigate('ArticleHub')}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive('ArticleHub') }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                activeOpacity={0.7}
+            >
+                <Ionicons name={isActive('ArticleHub') ? 'book' : 'book-outline'} size={24} color={isActive('ArticleHub') ? activeColor : inactiveColor} />
+                <Text style={[styles.navText, { color: isActive('ArticleHub') ? activeColor : inactiveColor }]}>月齢記事</Text>
             </TouchableOpacity>
 
             {/* 設定 */}

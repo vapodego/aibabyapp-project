@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "@google-cloud/tasks": "^6.2.0"
+    "@google-cloud/tasks": "^6.2.0",
+    "react-native-markdown-display": "^7.0.2"
   }
 }

@@ -16,6 +16,8 @@ import SuggestedPlansScreen from './screens/SuggestedPlansScreen';
 import DayPlanScreen from './screens/DayPlanScreen'; 
 import SettingsScreen from './screens/SettingsScreen'; // ◀◀◀ 本物の設定画面をインポート
 import PlanHistoryScreen from './screens/PlanHistoryScreen'; // ← 将来は専用ファイルに差し替え
+import MonthlyArticleScreen from './screens/MonthlyArticleScreen';
+import ArticleHubScreen from './screens/ArticleHubScreen';
 
 // Utilities & Firebase
 import { loadInitialRecords } from './utils/loadInitialRecords';
@@ -75,6 +77,8 @@ function MainTabNavigator() {
             iconName = focused ? 'calendar' : 'calendar-outline';
           } else if (route.name === 'SuggestedTab') {
             iconName = focused ? 'star' : 'star-outline';
+          } else if (route.name === 'ArticleHub') {
+            iconName = focused ? 'book' : 'book-outline';
           } else if (route.name === 'SettingsTab') {
             iconName = focused ? 'settings' : 'settings-outline';
           }
@@ -91,7 +95,7 @@ function MainTabNavigator() {
       <Tab.Screen name="HomeTab" component={ChatScreen} options={{ title: 'ホーム' }} />
       <Tab.Screen name="RecordTab" component={RecordScreen} options={{ title: '記録' }} />
       <Tab.Screen name="SuggestedTab" component={SuggestedPlansScreen} options={{ title: '提案' }} />
-      {/* ▼▼▼【修正点】componentをインポートしたSettingsScreenに変更 ▼▼▼ */}
+      <Tab.Screen name="ArticleHub" component={ArticleHubScreen} options={{ title: '月齢記事' }} />
       <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: '設定' }} />
     </Tab.Navigator>
   );
@@ -151,6 +155,7 @@ export default function App() {
                 <Stack.Screen name="SuggestedPlans" component={SuggestedPlansScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="DayPlan" component={DayPlanScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="PlanHistory" component={PlanHistoryScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="MonthlyArticle" component={MonthlyArticleScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
          </SafeAreaProvider>

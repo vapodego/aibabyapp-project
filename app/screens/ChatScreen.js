@@ -32,7 +32,7 @@ const staticSuggestionCards = [
     { type: 'ママケア', icon: 'heart-outline', text: '寝不足気味ではないですか？5分だけでも目を閉じて、肩の力を抜くストレッチをしてみてくださいね。' },
 ];
 
-export default function ChatScreen({ navigation }) {
+export default function ChatScreen({ navigation, route }) {
     // --- State管理 ---
     const [greeting, setGreeting] = useState('...');
     const [suggestions, setSuggestions] = useState([]);
@@ -44,6 +44,16 @@ export default function ChatScreen({ navigation }) {
     const [chatHistory, setChatHistory] = useState([]);
     const [userInput, setUserInput] = useState('');
     const flatListRef = useRef(null);
+    const chatInputRef = useRef(null);
+    const initialInjectedRef = useRef(false);
+    useEffect(() => {
+        const injected = route?.params?.initialText;
+        if (!injected || initialInjectedRef.current) return;
+        initialInjectedRef.current = true;
+        setIsChatModalVisible(true);
+        setUserInput(injected);
+        setTimeout(() => chatInputRef.current?.focus(), 250);
+    }, [route?.params?.initialText]);
     const insets = useSafeAreaInsets();
     const bottomPadding = (Platform.OS === 'ios' ? insets.bottom + 80 : insets.bottom + 70);
     
@@ -226,7 +236,14 @@ export default function ChatScreen({ navigation }) {
                     <View style={styles.chatModalContent}>
                         <FlatList ref={flatListRef} data={chatHistory} keyExtractor={(item, index) => index.toString()} renderItem={({ item }) => (<View style={[styles.messageBubble, item.role === 'user' ? styles.userBubble : styles.modelBubble]}><Text style={styles.messageText}>{item.parts[0].text}</Text></View>)} onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })} contentContainerStyle={{ padding: 10 }} />
                         <View style={styles.inputContainer}>
-                            <TextInput style={styles.chatInput} value={userInput} onChangeText={setUserInput} placeholder="まな先生にメッセージを送る..." multiline />
+                            <TextInput
+                                ref={chatInputRef}
+                                style={styles.chatInput}
+                                value={userInput}
+                                onChangeText={setUserInput}
+                                placeholder="まな先生にメッセージを送る..."
+                                multiline
+                            />
                             <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}><Ionicons name="send" size={24} color="white" /></TouchableOpacity>
                         </View>
                     </View>

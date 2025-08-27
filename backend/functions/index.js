@@ -1,4 +1,5 @@
 const { setGlobalOptions, https } = require("firebase-functions/v2");
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require("firebase-functions/params");
 
 setGlobalOptions({
@@ -113,4 +114,75 @@ exports.getPlanStatus = https.onRequest({
   return weeklyPlanner.getPlanStatus(req, res);
 }));
 
+// ---------------------------------------------------------------
+// Articles: seed & stubs (Phase 1 groundwork)
+// ---------------------------------------------------------------
+const db = admin.firestore();
+
+exports.seedArticles = https.onRequest({ timeoutSeconds: 120 }, withCors(async (req, res) => {
+  try {
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      return res.status(405).send('Method Not Allowed');
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const seed = [
+      {
+        title: '生後6か月：寝返りが増える時期',
+        monthAge: 6,
+        tags: ['発達'],
+        body: 'この月齢では体幹が育ち、寝返りが増えます。安全な環境づくりと見守りが大切です。',
+        version: 1,
+        locale: 'ja-JP',
+        status: 'published',
+      },
+      {
+        title: '生後6か月：離乳食の始め方',
+        monthAge: 6,
+        tags: ['離乳食'],
+        body: '鉄分・たんぱく質を意識しつつ、アレルギーに注意して一品ずつ進めましょう。',
+        version: 1,
+        locale: 'ja-JP',
+        status: 'published',
+      },
+      {
+        title: '生後5か月：うつ伏せ遊びで育つ力',
+        monthAge: 5,
+        tags: ['発達'],
+        body: 'うつ伏せでの手伸ばしやキックは体幹と上肢の発達を促します。短時間から安全に。',
+        version: 1,
+        locale: 'ja-JP',
+        status: 'published',
+      },
+    ];
+
+    const batch = db.batch();
+    seed.forEach((art) => {
+      const ref = db.collection('articles').doc();
+      batch.set(ref, { ...art, createdAt: now, updatedAt: now });
+    });
+    await batch.commit();
+
+    res.status(200).json({ ok: true, count: seed.length });
+  } catch (e) {
+    console.error('[seedArticles] error', e);
+    res.status(500).json({ ok: false, error: String(e && e.message ? e.message : e) });
+  }
+}));
+
+exports.generateMonthlyArticles = https.onRequest({ timeoutSeconds: 540, secrets: [GEMINI_API_KEY] }, withCors(async (req, res) => {
+  // TODO: Geminiで本文生成 → articles に保存
+  res.status(200).json({ ok: true, message: 'generateMonthlyArticles stub' });
+}));
+
+exports.deliverDailyFeeds = https.onRequest({ timeoutSeconds: 540 }, withCors(async (req, res) => {
+  // TODO: ユーザーごとに記事選定 → users/{uid}/articleFeeds に upsert
+  res.status(200).json({ ok: true, message: 'deliverDailyFeeds stub' });
+}));
+
 // --- 他のモジュール (DayPlanner, Notifications) は安定後に復帰予定 ---
+
+// ---------------------------------------------------------------
+// askArticleQuestion (Callable): 専用モジュールへ委譲（保存まで実行）
+// ---------------------------------------------------------------
+exports.askArticleQuestion = require('./qa/askArticleQuestion').askArticleQuestion;

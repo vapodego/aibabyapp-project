@@ -1,0 +1,19 @@
+
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // 記事画像（公開読み取り）。書き込みはクライアント不可。
+    match /images/articles/{articleId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // その他は閉じる（必要に応じて個別に開ける）
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
