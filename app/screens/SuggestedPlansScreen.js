@@ -177,6 +177,24 @@ const SuggestedPlansScreen = ({ navigation }) => {
   const functions = useMemo(() => getFunctions(getApp(), 'asia-northeast1'), []);
   const planDayFromUrl = useMemo(() => httpsCallable(functions, 'planDayFromUrl', { timeout: 540000 }), [functions]);
 
+  // Mark last opened time for unread badge logic (Phase 5)
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          let user = auth.currentUser;
+          if (!user) { await signInAnonymously(auth); user = auth.currentUser; }
+          if (!user || !active) return;
+          await setDoc(doc(db, 'users', user.uid), { suggestedLastOpenedAt: serverTimestamp() }, { merge: true });
+        } catch (e) {
+          console.warn('[SuggestedPlans] mark last opened failed:', e?.message || e);
+        }
+      })();
+      return () => { active = false; };
+    }, [auth, db])
+  );
+
   useEffect(() => {
     let isMounted = true;
     let unsubPlans = null;
@@ -485,20 +503,3 @@ const styles = StyleSheet.create({
 });
 
 export default SuggestedPlansScreen;
-  // Mark last opened time for unread badge logic
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      (async () => {
-        try {
-          let user = auth.currentUser;
-          if (!user) { await signInAnonymously(auth); user = auth.currentUser; }
-          if (!user || !active) return;
-          await setDoc(doc(db, 'users', user.uid), { suggestedLastOpenedAt: serverTimestamp() }, { merge: true });
-        } catch (e) {
-          console.warn('[SuggestedPlans] mark last opened failed:', e?.message || e);
-        }
-      })();
-      return () => { active = false; };
-    }, [auth, db])
-  );
