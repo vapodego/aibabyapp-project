@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Image, Modal, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getFirestore, collection, onSnapshot, query, orderBy, doc, getDocs, limit } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, query, orderBy, doc, getDocs, limit, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getApp } from 'firebase/app';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, useFocusEffect } from '@react-navigation/native';
 // import mockPlans from '../mock/suggestedPlans.js'; // ダミーデータはもう不要
 
 // --- ヘルパーコンポーネント ---
@@ -485,3 +485,20 @@ const styles = StyleSheet.create({
 });
 
 export default SuggestedPlansScreen;
+  // Mark last opened time for unread badge logic
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          let user = auth.currentUser;
+          if (!user) { await signInAnonymously(auth); user = auth.currentUser; }
+          if (!user || !active) return;
+          await setDoc(doc(db, 'users', user.uid), { suggestedLastOpenedAt: serverTimestamp() }, { merge: true });
+        } catch (e) {
+          console.warn('[SuggestedPlans] mark last opened failed:', e?.message || e);
+        }
+      })();
+      return () => { active = false; };
+    }, [auth, db])
+  );
