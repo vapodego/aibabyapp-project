@@ -10,10 +10,13 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Image,
+  Pressable,
+  Linking,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { getApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, collection, query, orderBy, getDocs } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, query, orderBy, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import NestedQA from '../components/NestedQA';
@@ -73,6 +76,27 @@ export default function MonthlyArticleScreen() {
   const [expandedNestedSentences, setExpandedNestedSentences] = useState({}); // { [answerSentence:string]: boolean }
   const [grandAnswersBySentence, setGrandAnswersBySentence] = useState({}); // { [answerSentenceLv2:string]: Array<QA> }
   const [expandedGrandNested, setExpandedGrandNested] = useState({}); // { [answerSentenceLv2:string]: boolean }
+
+  const [imgGenerating, setImgGenerating] = useState(false);
+  const CF_BASE = 'https://asia-northeast1-aibabyapp-abeae.cloudfunctions.net';
+  const ensureImage = React.useCallback(async (force = false) => {
+    if (!articleId) return;
+    try {
+      setImgGenerating(true);
+      const res = await fetch(`${CF_BASE}/ensureArticleImage${force ? '?force=1' : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articleId }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || '画像生成に失敗しました');
+      setArticle((prev) => prev ? { ...prev, image: json.image } : prev);
+    } catch (e) {
+      Alert.alert('画像生成エラー', String(e?.message || e));
+    } finally {
+      setImgGenerating(false);
+    }
+  }, [articleId]);
 
   // --- In-app lightweight debug overlay (for test builds without console output) ---
   const [debugLog, setDebugLog] = useState(null);
@@ -138,14 +162,17 @@ export default function MonthlyArticleScreen() {
             qa.selectedSentence = baseText;
             bySentence[baseText] = [qa, ...(bySentence[baseText] || [])];
           } else if (qa.depth === 2) {
-            const key2 = (d?.selection?.quote && normalizeKey(String(d.selection.quote))) || null;
+            // Prefer server-provided normKey/display if available
+            const display2 = String(d?.selection?.display || d?.selection?.quote || '');
+            const key2 = d?.selection?.normKey || (display2 ? normalizeKey(display2) : null);
             if (!key2) return; // 深掘り対象の回答文が無ければスキップ
-            qa.selectedSentence = key2;
+            qa.selectedSentence = display2; // UI 表示用は display を採用
             byChild[key2] = [qa, ...(byChild[key2] || [])];
           } else {
-            const key3 = (d?.selection?.quote && normalizeKey(String(d.selection.quote))) || null;
+            const display3 = String(d?.selection?.display || d?.selection?.quote || '');
+            const key3 = d?.selection?.normKey || (display3 ? normalizeKey(display3) : null);
             if (!key3) return;
-            qa.selectedSentence = key3;
+            qa.selectedSentence = display3; // UI 表示用は display を採用
             byGrand[key3] = [qa, ...(byGrand[key3] || [])];
           }
         });
@@ -156,6 +183,19 @@ export default function MonthlyArticleScreen() {
         const exp = {};
         Object.keys(bySentence).forEach(k => { exp[k] = true; });
         setExpandedSentences(prev => ({ ...prev, ...exp }));
+
+ if (Object.keys(byChild).length) {
+   setExpandedNestedSentences(prev => ({
+     ...prev,
+     ...Object.fromEntries(Object.keys(byChild).map(k => [k, true])),
+   }));
+ }
+ if (Object.keys(byGrand).length) {
+   setExpandedGrandNested(prev => ({
+     ...prev,
+     ...Object.fromEntries(Object.keys(byGrand).map(k => [k, true])),
+   }));
+ }
       } catch (e) {
         console.warn('[MonthlyArticle] load QAs failed:', e);
       }
@@ -176,7 +216,9 @@ export default function MonthlyArticleScreen() {
           console.warn('[MonthlyArticle] article not found:', articleId);
           return;
         }
-        if (isActive) setArticle({ id: snap.id, ...snap.data() });
+        const data = snap.data();
+        console.log('[MonthlyArticle] fetched article', { id: snap.id, hasBody: typeof data?.body === 'string', bodyBytes: String(data?.body || '').length });
+        if (isActive) setArticle({ id: snap.id, ...data });
       } catch (e) {
         console.warn('[MonthlyArticle] failed to load article:', e);
       } finally {
@@ -187,6 +229,22 @@ export default function MonthlyArticleScreen() {
     return () => { isActive = false; };
   }, [articleId, db]);
 
+  // Mark feed as read when article is opened
+  React.useEffect(() => {
+    (async () => {
+      try {
+        if (!articleId) return;
+        const uid = auth.currentUser?.uid;
+        if (!uid) return;
+        const feedRef = doc(db, 'users', uid, 'articleFeeds', articleId);
+        await setDoc(feedRef, { readAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
+      } catch (e) {
+        // non-fatal
+        console.warn('[MonthlyArticle] mark read failed:', e?.message || e);
+      }
+    })();
+  }, [articleId, db, auth]);
+
   // 表示用の月齢は記事由来を優先（なければ route の month）
   const displayMonth = useMemo(() => {
     const m = Number(article?.monthAge ?? month);
@@ -194,7 +252,59 @@ export default function MonthlyArticleScreen() {
   }, [article, month]);
 
   // Paragraphs & sentence hash maps
-  const paragraphs = useMemo(() => buildParagraphs(displayMonth), [displayMonth]);
+  // Prefer server-provided article body; fallback to month template
+  function splitIntoSections(text, sections = 4) {
+    try {
+      const raw = String(text || '').replace(/\r/g, '').trim();
+      if (!raw) return [];
+      // 1) try blank-line paragraphs first
+      let parts = raw.split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
+      if (parts.length >= sections) {
+        // Keep all paragraphs: first (sections-1) as-is, merge the rest into the last bucket
+        const head = parts.slice(0, sections - 1);
+        const tail = parts.slice(sections - 1).join('\n\n');
+        return [...head, tail];
+      }
+      // 2) otherwise split by Japanese sentences and rebalance
+      const sentences = raw
+        .split(/(?<=[。．！!？?])\s+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (!sentences.length) return [raw];
+      const per = Math.ceil(sentences.length / sections);
+      const buckets = [];
+      for (let i = 0; i < sections; i++) {
+        const chunk = sentences.slice(i * per, (i + 1) * per).join('');
+        if (chunk) buckets.push(chunk);
+      }
+      // pad if不足
+      while (buckets.length < sections) buckets.push('');
+      return buckets.slice(0, sections);
+    } catch (_) {
+      return [String(text || '')];
+    }
+  }
+
+  function normalizeSections(arr, n = 4) {
+    const parts = (Array.isArray(arr) ? arr.map(s => String(s || '').trim()).filter(Boolean) : []);
+    if (parts.length >= n) {
+      const head = parts.slice(0, n - 1);
+      const tail = parts.slice(n - 1).join('\n\n');
+      return [...head, tail];
+    }
+    while (parts.length < n) parts.push('');
+    return parts;
+  }
+
+  const paragraphs = useMemo(() => {
+    if (Array.isArray(article?.sections) && article.sections.length > 0) {
+      return normalizeSections(article.sections, 4);
+    }
+    if (article?.body && String(article.body).trim()) {
+      return splitIntoSections(article.body, 4);
+    }
+    return buildParagraphs(displayMonth);
+  }, [article, displayMonth]);
   const sentenceMaps = useMemo(() => {
     const textToHash = new Map();
     const hashToText = new Map();
@@ -319,12 +429,16 @@ export default function MonthlyArticleScreen() {
       console.log('[MonthlyArticle] askArticleQuestion result', result?.data);
       const server = result?.data || {};
       const baseKey2 = baseKey;
+      // Prefer server-provided selection.normKey/display for immediate append
+      const serverSel = server?.selection || null;
+      const selDisplay = String(serverSel?.display || selectionDisplay || '');
+      const selNormKey = String(serverSel?.normKey || '') || normalizeKey(selDisplay);
       const qa = {
         id: server.id || Date.now().toString(),
         question: trimmed,
         answer: String(server?.answer?.text || server?.answer || '（応答を取得できませんでした）'),
-        // 保存・即時反映ともに UI と同じ display 文面を持たせる（キーは参照側で normalize）
-        selectedSentence: selectionDisplay,
+        // UI 表示用は常に display を採用
+        selectedSentence: selDisplay,
         createdAt: new Date().toISOString(),
         depth: Math.min(curDepth + 1, MAX_DEPTH),
       };
@@ -342,33 +456,50 @@ export default function MonthlyArticleScreen() {
         setExpandedSentences((prev) => ({ ...prev, [baseKey2]: true }));
       } else {
         // 回答文への二次/三次回答：選択した回答文の直下にネスト表示
-        console.log('[MonthlyArticle] child-append key', { keyFromQA: qa.selectedSentence, norm: normalizeKey(qa.selectedSentence), keyFromRef: currentSelected, keyFromState: selectedSentence });
-        pushDebug({ tag: 'child-append-key', keyFromQA: qa.selectedSentence, norm: normalizeKey(qa.selectedSentence), keyFromRef: currentSelected, keyFromState: selectedSentence });
-        const key = normalizeKey(qa.selectedSentence); // 保存・復元と同じ正規化テキストを使用
+        console.log('[MonthlyArticle] child-append key', { keyFromQA: qa.selectedSentence, norm: selNormKey, fromRef: currentSelected, fromState: selectedSentence, fromServer: serverSel });
+        pushDebug({ tag: 'child-append-key', keyFromQA: qa.selectedSentence, norm: selNormKey, fromRef: currentSelected, fromState: selectedSentence });
+        const key = selNormKey; // サーバ由来の正規化キーを最優先
+        const dispKey = normalizeKey(selDisplay); // 表示文からのフォールバック（後方互換）
         if ((qa.depth || 0) <= 2) {
           // 2段目（child）
           setChildAnswersBySentence((prev) => {
-            const updated = { ...prev, [key]: [qa, ...(prev[key] || [])] };
+            const updated = { ...prev };
+            updated[key] = [qa, ...(updated[key] || [])];
+            if (dispKey && dispKey !== key) {
+              updated[dispKey] = [qa, ...(updated[dispKey] || [])];
+            }
             {
-              const payload = { key, depth: qa.depth, count: updated[key].length };
+              const payload = { key, alt: dispKey !== key ? dispKey : undefined, depth: qa.depth, count: updated[key].length };
               console.log('[MonthlyArticle] appended QA (child)', payload);
               pushDebug({ tag: 'child-append', ...payload });
             }
             return updated;
           });
-          setExpandedNestedSentences((prev) => ({ ...prev, [key]: true }));
+          setExpandedNestedSentences((prev) => ({
+            ...prev,
+            [key]: true,
+            ...(dispKey && dispKey !== key ? { [dispKey]: true } : {}),
+          }));
         } else {
           // 3段目（grand）
           setGrandAnswersBySentence((prev) => {
-            const updated = { ...prev, [key]: [qa, ...(prev[key] || [])] };
+            const updated = { ...prev };
+            updated[key] = [qa, ...(updated[key] || [])];
+            if (dispKey && dispKey !== key) {
+              updated[dispKey] = [qa, ...(updated[dispKey] || [])];
+            }
             {
-              const payload = { key, depth: qa.depth, count: updated[key].length };
+              const payload = { key, alt: dispKey !== key ? dispKey : undefined, depth: qa.depth, count: updated[key].length };
               console.log('[MonthlyArticle] appended QA (grand)', payload);
               pushDebug({ tag: 'grand-append', ...payload });
             }
             return updated;
           });
-          setExpandedGrandNested((prev) => ({ ...prev, [key]: true }));
+          setExpandedGrandNested((prev) => ({
+            ...prev,
+            [key]: true,
+            ...(dispKey && dispKey !== key ? { [dispKey]: true } : {}),
+          }));
         }
         // 親（ベース）も開いておく
         setExpandedSentences((prev) => ({ ...prev, [baseKey2]: true }));
@@ -394,12 +525,16 @@ export default function MonthlyArticleScreen() {
   const toggleSentenceExpand = (s) => {
     setExpandedSentences((prev) => ({ ...prev, [s]: !prev[s] }));
   };
-  const toggleNestedExpand = (ansSentence) => {
-    const k = normalizeKey(ansSentence);
+  // Helper: accepts raw sentence or already-normalized key
+ const toAsKey = (ansOrKey) => normalizeKey(String(ansOrKey || ''));
+
+  const toggleNestedExpand = (ansOrKey) => {
+    const k = toAsKey(ansOrKey);
     setExpandedNestedSentences((prev) => ({ ...prev, [k]: !prev[k] }));
   };
-  const toggleGrandNestedExpand = (ansSentence) => {
-    const k = normalizeKey(ansSentence);
+
+  const toggleGrandNestedExpand = (ansOrKey) => {
+    const k = toAsKey(ansOrKey);
     setExpandedGrandNested((prev) => ({ ...prev, [k]: !prev[k] }));
   };
 
@@ -416,12 +551,33 @@ export default function MonthlyArticleScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 72, android: 0 })}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{title}</Text>
-        <Text style={styles.headerSubtitle}>生後{displayMonth}か月になりました。今月の見どころと、気になる点をその場で質問できます。</Text>
-      </View>
-
       <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
+        {/* 画像を本文と同様にスクロールさせる（最上部） */}
+        <View style={[styles.heroWrap, { marginBottom: 12 }]}>
+          {article?.image?.url ? (
+            <Image
+              source={{ uri: article.image.url }}
+              style={styles.heroImage}
+              resizeMode="cover"
+              accessible
+              accessibilityLabel={article?.image?.alt || article?.title || '記事画像'}
+            />
+          ) : (
+            <View style={styles.heroPlaceholder}>
+              <Text style={styles.phIconLarge}>🖼️</Text>
+              <Text style={styles.phHelp}>この記事のヘッダー画像はまだありません</Text>
+              <Pressable style={styles.genBadge} onPress={() => ensureImage(false)} disabled={imgGenerating}>
+                {imgGenerating ? <ActivityIndicator color="#fff" /> : <Text style={styles.genBadgeText}>画像生成</Text>}
+              </Pressable>
+            </View>
+          )}
+        </View>
+
+        {/* タイトル＆サブタイトル */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+          <Text style={styles.headerTitle}>{title}</Text>
+          <Text style={styles.headerSubtitle}>生後{displayMonth}か月になりました。今月の見どころと、気になる点をその場で質問できます。</Text>
+        </View>
         <Section title="発達の目安">
           <ParagraphWithQA
             text={paragraphs[0]}
@@ -513,6 +669,25 @@ export default function MonthlyArticleScreen() {
             styles={styles}
           />
         </Section>
+
+        {/* 参考情報（sources があれば表示） */}
+        {Array.isArray(article?.sources) && article.sources.length > 0 && (
+          <Section title="参考情報">
+            <View style={{ gap: 8 }}>
+              {article.sources.map((s, i) => (
+                <Pressable
+                  key={i}
+                  onPress={() => { const u = String(s?.url || ''); if (u) Linking.openURL(u).catch(() => {}); }}
+                  style={styles.sourceItem}
+                >
+                  <Text style={styles.sourceTitle}>{String(s?.title || '参考情報')}</Text>
+                  {s?.note ? <Text style={styles.sourceNote} numberOfLines={3}>{String(s.note)}</Text> : null}
+                  {s?.url ? <Text style={styles.sourceUrl} numberOfLines={1}>{String(s.url)}</Text> : null}
+                </Pressable>
+              ))}
+            </View>
+          </Section>
+        )}
       </ScrollView>
 
       {/* 下部質問入力バー */}
@@ -578,6 +753,45 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: '800', color: '#333' },
   headerSubtitle: { marginTop: 6, fontSize: 13, color: '#666', lineHeight: 18 },
+
+  heroWrap: {
+    backgroundColor: '#fff',
+  },
+  heroImage: {
+    width: '100%',
+    height: 200,
+  },
+  heroPlaceholder: {
+    width: '100%',
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F6FA',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
+  },
+  // Sources
+  sourceItem: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e5e5',
+    backgroundColor: '#fff',
+  },
+  sourceTitle: { fontSize: 14, fontWeight: '700', color: '#333' },
+  sourceNote: { marginTop: 4, fontSize: 13, color: '#444', lineHeight: 18 },
+  sourceUrl: { marginTop: 4, fontSize: 12, color: '#2563EB' },
+  phIconLarge: { fontSize: 28 },
+  phHelp: { marginTop: 6, fontSize: 12, color: '#666' },
+  genBadge: {
+    marginTop: 8,
+    backgroundColor: '#6C63FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  genBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   content: { padding: 16, paddingBottom: 32 },
   section: { marginBottom: 18 },

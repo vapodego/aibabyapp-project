@@ -40,6 +40,61 @@ try {
   // SDK not installed yet; we will fallback to dummy
 }
 
+// ★★★ 追加: Markdownをプレーンテキストに変換する関数 ★★★
+//
+// 概要:
+// - 一般的なMarkdown記法（太字、イタリック、リンク、リストなど）を除去します。
+// - これにより、Firestoreに保存されるテキストが常にクリーンな状態となり、
+//   フロントエンドでのキー不一致問題を根本的に解決します。
+//
+function toPlain(markdownText) {
+  if (!markdownText || typeof markdownText !== 'string') {
+    return '';
+  }
+  let text = markdownText;
+  // **bold** and *italic*
+  text = text.replace(/\*\*(.*?)\*\*|\*(.*?)\*/g, '$1$2');
+  // [link text](url) -> link text
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  // `code`
+  text = text.replace(/`([^`]+)`/g, '$1');
+  // headings (#, ##, etc.)
+  text = text.replace(/^\s*#+\s+/gm, '');
+  // list markers (*, -, 1.)
+  text = text.replace(/^\s*[-*]\s+/gm, '');
+  text = text.replace(/^\s*\d+\.\s+/gm, '');
+  // blockquotes (>)
+  text = text.replace(/^\s*>\s+/gm, '');
+  // horizontal rules (---, ***)
+  text = text.replace(/^\s*[-*_]{3,}\s*$/gm, '');
+  // collapse multiple newlines
+  text = text.replace(/\n{2,}/g, '\n');
+
+  return text.trim();
+}
+
+// ---- Normalize selection for stable key matching (server-side) ----
+function normalizeKeyServer(s) {
+  if (!s) return "";
+  // 1) plain化（装飾・見出し・箇条書き等の除去）
+  let t = toPlain(String(s));
+  // 2) 正規化：NFKC → 小文字化 → 余分な空白圧縮
+  t = t.normalize('NFKC').toLowerCase();
+  t = t.replace(/\s+/g, ' ').trim();
+
+  // 3) 記号・句読点の除去
+  //    - ASCII 系の句読点・記号（HTML エンティティを使わず、最小限のエスケープに整理）
+  const ASCII_PUNCT = /[!"#$%&'()*+,./:;<>?@\\^_`{|}~-]/g;
+  //    - 日本語句読点・括弧など（全角）
+  const JP_PUNCT = /[、。．，・：；！？”“’‘「」『』（）【】《》〔〕［］〈〉…ー—〜]/g;
+
+  t = t.replace(ASCII_PUNCT, '');
+  t = t.replace(JP_PUNCT, '');
+
+  return t.trim();
+}
+
+
 // ---- Gemini caller (real if possible; otherwise dummy) ----
 async function callGemini({ system, user }) {
   const prompt = [
@@ -112,6 +167,9 @@ exports.askArticleQuestion = onCall({ region: "asia-northeast1", timeoutSeconds:
     }
 
     const quote = String(selection?.quote || "");
+    const selectedDisplay = quote ? toPlain(quote) : "";
+    const selectedNormKey = selectedDisplay ? normalizeKeyServer(selectedDisplay) : "";
+    logger.info("askArticleQuestion selection keys", { hasQuote: !!quote, displayBytes: selectedDisplay.length, hasNormKey: !!selectedNormKey });
     // depthNum=1 のときだけ本文アンカーを扱う（depth>=2 は selection.quote を復元キーにする）
     const sentenceHash = depthNum === 1 ? (anchor?.sentenceHash || (quote ? stableIdFor(quote) : null)) : null;
 
@@ -130,15 +188,22 @@ exports.askArticleQuestion = onCall({ region: "asia-northeast1", timeoutSeconds:
       .join("\n");
 
     logger.info("[askArticleQuestion] calling gemini", { useRealGemini, hasKey: !!process.env.GEMINI_API_KEY, hasHash: !!sentenceHash });
-    const answerText = await callGemini({ system, user });
+    const rawAnswerText = await callGemini({ system, user });
+
+    // ★★★ 修正点: Geminiからの回答をプレーンテキストに変換 ★★★
+    const plainAnswerText = toPlain(rawAnswerText);
+    logger.info("askArticleQuestion converted to plain text", { before: rawAnswerText.length, after: plainAnswerText.length });
+
 
     logger.info("askArticleQuestion building qaDoc", { depth, depthNum, hasSentenceHash: !!sentenceHash, hasQuote: !!quote });
+    const selectionObj = quote ? { quote, display: selectedDisplay, normKey: selectedNormKey } : null;
     const qaDoc = {
       question: String(question),
-      answer: { text: String(answerText) },
+      // ★★★ 修正点: 変換後のプレーンテキストを保存 ★★★
+      answer: { text: plainAnswerText },
       depth: depthNum,
       parentId: parentId || null,
-      selection: quote ? { quote } : null,
+      selection: selectionObj,
       // depth=1 のみ anchor を保存（depth>=2 は null）
       anchor: (depthNum === 1 && sentenceHash)
         ? {
@@ -159,10 +224,10 @@ exports.askArticleQuestion = onCall({ region: "asia-northeast1", timeoutSeconds:
     logger.info("askArticleQuestion saved", { uid, articleId, qaId: ref.id, depth: depthNum });
     return {
       id: ref.id,
-      answer: qaDoc.answer,
+      answer: qaDoc.answer, // プレーンテキスト化された回答を返す
       depth: depthNum,
       parentId: parentId || null,
-      selection: quote ? { quote } : null,
+      selection: selectionObj,
     };
   } catch (err) {
     // If the error is already an HttpsError, rethrow as-is

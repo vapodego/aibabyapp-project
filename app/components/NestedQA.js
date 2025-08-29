@@ -116,6 +116,8 @@ export default function NestedQA({
   const latestRest = Math.max(((hideBase ? (qaList?.length || 0) - 1 : (qaList?.length || 0)) - 3), 0);
   // 親で最新を描画済みなら重複回避のため先頭を除外
   const renderList = hideBase ? (qaList || []).slice(1) : (qaList || []);
+  // Memoized normalized selected key for stable comparison
+  const selectedKey = normalizeKey(selectedSentence || '');
 
   return (
     <View style={styles.pinBody}>
@@ -143,13 +145,20 @@ export default function NestedQA({
                         accessibilityRole="button"
                         accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(qa && typeof qa.depth === 'number') ? qa.depth : 1}です`}
                         onPress={() => {
+                          // 外側で parse 済みの asKey をそのまま使う（再代入しない）
+                          const baseDepth = (qa && typeof qa.depth === 'number') ? qa.depth : 1;
                           try { console.log('[NestedQA] tap L2 sentence', { sentence: as, depth: qa?.depth }); } catch {}
                           try {
                             const childCount = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0;
                             const expanded = !!expandedNestedSentences?.[asKey];
                             onDebug && onDebug({ tag: 'tap-as-eval', level: 2, as, asKey, childCount, expanded });
-                          } catch (_) {}
-                          onPressAnswerSentence?.(as, qa?.depth);
+                          } catch {}
+                          onPressAnswerSentence?.(as, baseDepth);
+                          // 未展開のときだけ自動で開く（毎回トグルしない）
+                          try {
+                            const isExpandedNow = !!expandedNestedSentences?.[asKey];
+                            if (!isExpandedNow) toggleNestedExpand?.(asKey);
+                          } catch {}
                         }}
                         onLongPress={() => {
                           try {
@@ -167,7 +176,7 @@ export default function NestedQA({
                               style={[
                                 styles.answerSentence,
                                 { paddingVertical: 4 },
-                                asKey === normalizeKey(selectedSentence) && styles.selectedSentence
+                                asKey === selectedKey && styles.selectedSentence
                               ]}
                             />
                           </View>
@@ -187,9 +196,9 @@ export default function NestedQA({
                       onDebug && onDebug({ tag: 'render-L2', asKey, childCount, expanded, sampleKeys: Object.keys(childAnswersBySentence || {}).slice(0, 3) });
                     } catch (_) {} })()}
 
-                    {Array.isArray(childAnswersBySentence?.[asKey]) && childAnswersBySentence[asKey].length > 0 && (expandedNestedSentences?.[asKey]) ? (
+                    {expandedNestedSentences?.[asKey] ? (
                       <View style={{ marginLeft: hadBullet ? 22 : 16, marginTop: 6 }}>
-                        {childAnswersBySentence[asKey].map((cqa, m) => (
+                        {(childAnswersBySentence?.[asKey] || []).map((cqa, m) => (
                           <View key={m} style={{ marginBottom: 4 }}>
                             {String(cqa.answer).split(/\r?\n/)
                               .map((raw) => String(raw).trim())
@@ -207,13 +216,19 @@ export default function NestedQA({
                                         accessibilityRole="button"
                                         accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(cqa && typeof cqa.depth === 'number') ? cqa.depth : 2}です`}
                                         onPress={() => {
+                                          // 外側で作成した as2Key をそのまま使う
+                                          const baseDepth = (cqa && typeof cqa.depth === 'number') ? cqa.depth : 2;
                                           try { console.log('[NestedQA] tap L3 sentence', { sentence: as2, depth: cqa?.depth }); } catch {}
                                           try {
                                             const grandCount = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0;
                                             const gExpanded = !!expandedGrandNested?.[as2Key];
                                             onDebug && onDebug({ tag: 'tap-as2-eval', level: 3, as2, as2Key, grandCount, expanded: gExpanded });
-                                          } catch (_) {}
-                                          onPressAnswerSentence?.(as2, cqa?.depth);
+                                          } catch {}
+                                          onPressAnswerSentence?.(as2, baseDepth);
+                                          try {
+                                            const isExpandedNow = !!expandedGrandNested?.[as2Key];
+                                            if (!isExpandedNow) toggleGrandNestedExpand?.(as2Key);
+                                          } catch {}
                                         }}
                                         onLongPress={() => {
                                           try {
@@ -231,7 +246,7 @@ export default function NestedQA({
                                               style={[
                                                 styles.answerSentence,
                                                 { paddingVertical: 4 },
-                                                as2Key === normalizeKey(selectedSentence) && styles.selectedSentence
+                                                as2Key === selectedKey && styles.selectedSentence
                                               ]}
                                             />
                                           </View>
@@ -251,9 +266,9 @@ export default function NestedQA({
                                       onDebug && onDebug({ tag: 'render-L3', as2Key, grandCount, expanded: gExpanded, sampleKeys: Object.keys(grandAnswersBySentence || {}).slice(0, 3) });
                                     } catch (_) {} })()}
 
-                                    {Array.isArray(grandAnswersBySentence?.[as2Key]) && grandAnswersBySentence[as2Key].length > 0 && (expandedGrandNested?.[as2Key]) ? (
+                                    {expandedGrandNested?.[as2Key] ? (
                                       <View style={{ marginLeft: hadBullet2 ? 22 : 16, marginTop: 4 }}>
-                                        {grandAnswersBySentence[as2Key].map((gqa, t) => (
+                                        {(grandAnswersBySentence?.[as2Key] || []).map((gqa, t) => (
                                           <View key={t} style={{ marginBottom: 4 }}>
                                             {String(gqa.answer).split(/\r?\n/)
                                               .map((raw) => String(raw).trim())
@@ -278,7 +293,7 @@ export default function NestedQA({
                                                     >
                                                       <InlineMD
                                                         text={as3}
-                                                        style={[styles.answerSentence, { paddingVertical: 4 }, as3Key === normalizeKey(selectedSentence) && styles.selectedSentence]}
+                                                        style={[styles.answerSentence, { paddingVertical: 4 }, as3Key === selectedKey && styles.selectedSentence]}
                                                       />
                                                     </TouchableOpacity>
                                                   </View>

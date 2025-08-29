@@ -24,7 +24,7 @@ import { loadInitialRecords } from './utils/loadInitialRecords';
 import { initializeApp } from 'firebase/app';
 import { initializeAuth, getReactNativePersistence, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
-import { getFirestore, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, serverTimestamp, collection, query, where, onSnapshot } from 'firebase/firestore';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, APP_ID, MEASUREMENT_ID } from '@env';
@@ -55,6 +55,27 @@ async function registerForPushNotificationsAsync() { /* ... */ }
 
 // --- タブナビゲーターを持つコンポーネントを定義 ---
 function MainTabNavigator() {
+  const [unreadArticles, setUnreadArticles] = useState(0);
+  const [uid, setUid] = useState(auth.currentUser?.uid || null);
+
+  // Track auth and subscribe to unread article feeds
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (u) => setUid(u?.uid || null));
+    return () => unsubAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!uid) { setUnreadArticles(0); return; }
+    const feedsCol = collection(db, 'users', uid, 'articleFeeds');
+    const q = query(feedsCol, where('readAt', '==', null));
+    const unsub = onSnapshot(q, (snap) => {
+      setUnreadArticles(snap.size || 0);
+    }, (err) => {
+      console.warn('[MainTab] unread feeds subscribe failed:', err?.message || err);
+      setUnreadArticles(0);
+    });
+    return () => unsub();
+  }, [uid]);
   // ▼▼▼【修正点】仮の設定画面コンポーネントを削除 ▼▼▼
   /*
   const SettingsScreen = () => (
@@ -95,7 +116,15 @@ function MainTabNavigator() {
       <Tab.Screen name="HomeTab" component={ChatScreen} options={{ title: 'ホーム' }} />
       <Tab.Screen name="RecordTab" component={RecordScreen} options={{ title: '記録' }} />
       <Tab.Screen name="SuggestedTab" component={SuggestedPlansScreen} options={{ title: '提案' }} />
-      <Tab.Screen name="ArticleHub" component={ArticleHubScreen} options={{ title: '月齢記事' }} />
+      <Tab.Screen
+        name="ArticleHub"
+        component={ArticleHubScreen}
+        options={{
+          title: '月齢記事',
+          tabBarBadge: unreadArticles > 0 ? (unreadArticles > 9 ? '9+' : unreadArticles) : undefined,
+          tabBarBadgeStyle: { backgroundColor: '#FF3B30' },
+        }}
+      />
       <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: '設定' }} />
     </Tab.Navigator>
   );

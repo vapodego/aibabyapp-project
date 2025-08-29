@@ -88,20 +88,34 @@ export default function ParagraphWithQA({
                               accessibilityRole="button"
                               accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(latest && typeof latest.depth === 'number') ? latest.depth : 1}です`}
                               onPress={() => {
-                                try { console.log('[ParagraphWithQA] tap expanded sentence', { sentence: sent, depth: latest?.depth }); } catch {}
                                 const baseDepth = (latest && typeof latest.depth === 'number') ? latest.depth : 1;
+                                const asKey = key; // 正規化キーは常にこれを使用
+
                                 // Debug: report keys/counts at tap time
                                 try {
-                                  if (onDebug) {
-                                    const asKey = key; // 共有の正規化キー
-                                    const childCount = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0;
-                                    const expanded = !!expandedNestedSentences?.[asKey];
-                                    onDebug({ tag: 'tap-answer', as: display, asKey, childCount, expanded, debugChildKeysCount: (debugChildKeys || []).length, debugExpandedKeysCount: (debugExpandedKeys || []).length });
+                                  const childCount = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0;
+                                  const expanded = !!expandedNestedSentences?.[asKey];
+                                  onDebug?.({
+                                    tag: 'tap-answer',
+                                    as: display,
+                                    asKey,
+                                    childCount,
+                                    expanded,
+                                    debugChildKeysCount: (debugChildKeys || []).length,
+                                    debugExpandedKeysCount: (debugExpandedKeys || []).length,
+                                  });
+                                } catch {}
+
+                                // まず質問を投げる（display は表示用、キーはサーバで normKey に変換）
+                                onPressAnswerSentence?.(sent, baseDepth);
+
+                                // 未展開のときだけ自動で開く（毎回トグルしない）
+                                try {
+                                  const isExpandedNow = !!expandedNestedSentences?.[asKey];
+                                  if (!isExpandedNow) {
+                                    onToggleNestedExpand?.(asKey);
                                   }
                                 } catch {}
-                                onPressAnswerSentence?.(sent, baseDepth);
-                                // 自動で2段目を展開（回答が届いたら即見えるように）
-                                onToggleNestedExpand?.(sent);
                               }}
                               style={{ flex: 1 }}
                             >
