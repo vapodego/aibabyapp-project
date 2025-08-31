@@ -29,6 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, APP_ID, MEASUREMENT_ID } from '@env';
+import { PULSE_POLICY, SUGGESTED_UNREAD_BY_FLAG } from './config/featureFlags';
 
 // --- Navigatorのインスタンスを作成 ---
 const Stack = createNativeStackNavigator();
@@ -60,6 +61,7 @@ function MainTabNavigator() {
   const [unreadSuggested, setUnreadSuggested] = useState(0);
   const [uid, setUid] = useState(auth.currentUser?.uid || null);
   const [suggestedLastOpened, setSuggestedLastOpened] = useState(null);
+  const [isPlanGenerating, setIsPlanGenerating] = useState(false);
   const [latestRunId, setLatestRunId] = useState(null);
 
   // Track auth and subscribe to unread article feeds
@@ -83,10 +85,12 @@ function MainTabNavigator() {
 
   // Suggested: track last opened and latest run
   useEffect(() => {
-    if (!uid) { setSuggestedLastOpened(null); return; }
+    if (!uid) { setSuggestedLastOpened(null); setIsPlanGenerating(false); return; }
     const unsub = onSnapshot(doc(db, 'users', uid), (snap) => {
-      setSuggestedLastOpened(snap.data()?.suggestedLastOpenedAt || null);
-    }, () => setSuggestedLastOpened(null));
+      const data = snap.data() || {};
+      setSuggestedLastOpened(data.suggestedLastOpenedAt || null);
+      setIsPlanGenerating(String(data.planGenerationStatus || '') === 'in_progress');
+    }, () => { setSuggestedLastOpened(null); setIsPlanGenerating(false); });
     return () => unsub();
   }, [uid]);
   useEffect(() => {
@@ -100,31 +104,65 @@ function MainTabNavigator() {
   }, [uid]);
   useEffect(() => {
     if (!uid || !latestRunId) { setUnreadSuggested(0); return; }
-    const plansQ = query(collection(db, 'users', uid, 'planRuns', latestRunId, 'suggestedPlans'), orderBy('createdAt', 'desc'));
+    const plansQ = query(
+      collection(db, 'users', uid, 'planRuns', latestRunId, 'suggestedPlans'),
+      orderBy('createdAt', 'desc')
+    );
     const unsub = onSnapshot(plansQ, (snap) => {
-      if (!snap) { setUnreadSuggested(0); return; }
-      const last = suggestedLastOpened;
-      if (!last) { setUnreadSuggested(snap.size || 0); return; }
-      const lastMs = last?.toMillis ? last.toMillis() : (last?.seconds ? last.seconds * 1000 : Date.parse(last) || 0);
-      let count = 0;
-      snap.docs.forEach(d => {
-        const c = d.data()?.createdAt;
-        const ms = c?.toMillis ? c.toMillis() : (c?.seconds ? c.seconds * 1000 : Date.parse(c) || 0);
-        if (!lastMs || (ms && ms > lastMs)) count += 1;
-      });
-      setUnreadSuggested(count);
+      try {
+        if (!snap) { setUnreadSuggested(0); return; }
+        if (SUGGESTED_UNREAD_BY_FLAG) {
+          let cnt = 0;
+          snap.docs.forEach(d => { const rd = d.data(); if (!rd || rd.placeholder) return; if (!rd.readAt) cnt += 1; });
+          setUnreadSuggested(cnt);
+          return;
+        }
+        // timestamp-based fallback (since last opened)
+        const last = suggestedLastOpened;
+        if (!last) { setUnreadSuggested(snap.size || 0); return; }
+        const lastMs = last?.toMillis ? last.toMillis() : (last?.seconds ? last.seconds * 1000 : Date.parse(last) || 0);
+        let count = 0;
+        snap.docs.forEach(d => {
+          const c = d.data()?.createdAt;
+          const ms = c?.toMillis ? c.toMillis() : (c?.seconds ? c.seconds * 1000 : Date.parse(c) || 0);
+          if (!lastMs || (ms && ms > lastMs)) count += 1;
+        });
+        setUnreadSuggested(count);
+      } catch (_) { setUnreadSuggested(0); }
     }, () => setUnreadSuggested(0));
     return () => unsub();
   }, [uid, latestRunId, suggestedLastOpened]);
 
-  // One-time mini pulse animation per tab when unread > 0
-  const useOneTimePulseValue = (storageKey, trigger) => {
+  // OS app icon badge count (sum of unread counts)
+  useEffect(() => {
+    const total = (unreadArticles || 0) + (unreadSuggested || 0);
+    Notifications.setBadgeCountAsync(total).catch(() => {});
+  }, [unreadArticles, unreadSuggested]);
+
+  // One-time (policy-based) mini pulse animation per tab when unread > 0
+  const useOneTimePulseValue = (baseKey, trigger, policy) => {
     const scale = useRef(new Animated.Value(1)).current;
+    const computeStorageKey = () => {
+      const p = policy || { type: 'once' };
+      if (p.type === 'daily') {
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${baseKey}:daily:${yyyy}-${mm}-${dd}`;
+      }
+      if (p.type === 'version') {
+        const v = String(p.version || 'v1');
+        return `${baseKey}:ver:${v}`;
+      }
+      return `${baseKey}:once`;
+    };
     useEffect(() => {
       let canceled = false;
       (async () => {
         try {
           if (!trigger) return;
+          const storageKey = computeStorageKey();
           const done = await AsyncStorage.getItem(storageKey);
           if (done) return;
           if (canceled) return;
@@ -132,15 +170,15 @@ function MainTabNavigator() {
           Animated.sequence([
             Animated.timing(scale, { toValue: 1.18, duration: 360, easing: Easing.out(Easing.quad), useNativeDriver: true }),
             Animated.timing(scale, { toValue: 1.0, duration: 320, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-          ]).start(() => { AsyncStorage.setItem(storageKey, '1').catch(() => {}); });
+          ]).start(() => { const k = computeStorageKey(); AsyncStorage.setItem(k, '1').catch(() => {}); });
         } catch (_) {}
       })();
       return () => { canceled = true; };
-    }, [storageKey, trigger]);
+    }, [baseKey, trigger, policy]);
     return scale;
   };
-  const articleScale = useOneTimePulseValue('pulse_tab_article', unreadArticles > 0);
-  const suggestedScale = useOneTimePulseValue('pulse_tab_suggested', unreadSuggested > 0);
+  const articleScale = useOneTimePulseValue('pulse_tab_article', unreadArticles > 0, PULSE_POLICY.article);
+  const suggestedScale = useOneTimePulseValue('pulse_tab_suggested', unreadSuggested > 0, PULSE_POLICY.suggested);
   // ▼▼▼【修正点】仮の設定画面コンポーネントを削除 ▼▼▼
   /*
   const SettingsScreen = () => (
@@ -165,13 +203,20 @@ function MainTabNavigator() {
       iconName = focused ? 'settings' : 'settings-outline';
     }
     const scaleVal = route.name === 'ArticleHub' ? articleScale : (route.name === 'SuggestedTab' ? suggestedScale : null);
-    if (!scaleVal) return <Ionicons name={iconName} size={size} color={color} />;
+    const baseIcon = <Ionicons name={iconName} size={size} color={color} />;
+    const showPlanBadge = (route.name === 'SuggestedTab') && isPlanGenerating;
+    if (!scaleVal && !showPlanBadge) return baseIcon;
     return (
-      <Animated.View style={{ transform: [{ scale: scaleVal }] }}>
-        <Ionicons name={iconName} size={size} color={color} />
+      <Animated.View style={{ transform: scaleVal ? [{ scale: scaleVal }] : undefined }}>
+        {baseIcon}
+        {showPlanBadge ? (
+          <View style={{ position: 'absolute', right: -2, top: -2, backgroundColor: '#0EA5E9', borderRadius: 8, padding: 2 }}>
+            <Ionicons name="time-outline" size={10} color="#fff" />
+          </View>
+        ) : null}
       </Animated.View>
     );
-  }, [articleScale, suggestedScale]);
+  }, [articleScale, suggestedScale, isPlanGenerating]);
 
   return (
     <Tab.Navigator

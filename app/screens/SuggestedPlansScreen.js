@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Image, Modal, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Image, Modal, ScrollView, Pressable, Dimensions, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getFirestore, collection, onSnapshot, query, orderBy, doc, getDocs, limit, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -7,6 +7,7 @@ import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getApp } from 'firebase/app';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SUGGESTED_UNREAD_BY_FLAG } from '../config/featureFlags';
 import { useRoute, useFocusEffect } from '@react-navigation/native';
 // import mockPlans from '../mock/suggestedPlans.js'; // ダミーデータはもう不要
 
@@ -61,7 +62,10 @@ const SuggestedPlansScreen = ({ navigation }) => {
   const [isPlanning, setIsPlanning] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [selectedPlanRunId, setSelectedPlanRunId] = useState(null);
   const [latestRunId, setLatestRunId] = useState(null);
+  const latestRunIdRef = useRef(null);
+  useEffect(() => { latestRunIdRef.current = latestRunId; }, [latestRunId]);
   const [viewingRunId, setViewingRunId] = useState(null);
   const [recentRuns, setRecentRuns] = useState([]); // 過去のラン（最新含む上位）
 
@@ -115,7 +119,7 @@ const SuggestedPlansScreen = ({ navigation }) => {
     if (items.length === 0) return null;
     return (
       <View style={styles.historyFooter}>
-        <Text style={styles.pastFooterTitle}>過去のプラン</Text>
+        <Text style={styles.pastFooterTitle}>🕰️ 過去のプラン</Text>
         {items.map((run) => {
           const createdAtText = run?.createdAt?.toDate ? run.createdAt.toDate().toLocaleString() : run.id;
           const isOpen = expandedRunIds.includes(run.id);
@@ -141,10 +145,15 @@ const SuggestedPlansScreen = ({ navigation }) => {
                       <View key={p.id} style={styles.smallPlanCard}>
                         <Image source={{ uri: p.imageUrl || 'https://placehold.co/600x400' }} style={styles.smallCardImage} />
                         <View style={styles.smallCardBody}>
-                          <Text style={styles.smallPlanTitle} numberOfLines={1}>{p.planName}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Text style={styles.smallPlanTitle} numberOfLines={1}>{p.planName}</Text>
+                            {SUGGESTED_UNREAD_BY_FLAG && !p.readAt ? (
+                              <View style={[styles.newPill, { marginLeft: 6 }]}><Text style={styles.newPillText}>NEW</Text></View>
+                            ) : null}
+                          </View>
                           <Text style={styles.smallPlanEvent} numberOfLines={1}>{p.eventName}</Text>
                           <Text style={styles.smallPlanSummary} numberOfLines={2}>{p.summary}</Text>
-                          <TouchableOpacity style={styles.smallDetailBtn} onPress={() => handleShowDetails(p)}>
+                          <TouchableOpacity style={styles.smallDetailBtn} onPress={() => handleShowDetails(p, run.id)}>
                             <Text style={styles.smallDetailBtnText}>詳細を見る →</Text>
                           </TouchableOpacity>
                         </View>
@@ -177,6 +186,61 @@ const SuggestedPlansScreen = ({ navigation }) => {
   const functions = useMemo(() => getFunctions(getApp(), 'asia-northeast1'), []);
   const planDayFromUrl = useMemo(() => httpsCallable(functions, 'planDayFromUrl', { timeout: 540000 }), [functions]);
 
+  // Edge fade (disabled if expo-linear-gradient is not installed). Keeping off to avoid runtime require issues.
+  const LinearGradient = null;
+
+  // Dimensions for horizontal rail
+  const FEATURED_N = 5;
+  const screenW = Dimensions.get('window').width;
+  const CARD_W = Math.round(screenW * 0.78);
+  const CARD_SPACING = 12;
+
+  // Collapsing hero (fade-only): tracks scroll for opacity interpolation
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [heroMinH, setHeroMinH] = useState(0); // measured hero height
+  const fadeRange = Math.max(100, (heroMinH || 160));
+  const clampedY = Animated.diffClamp(scrollY, 0, fadeRange);
+  const heroOpacity = clampedY.interpolate({ inputRange: [0, fadeRange], outputRange: [1, 0], extrapolate: 'clamp' });
+
+  // Past plans flattened (from recent runs except latest)
+  const [pastFlatPlans, setPastFlatPlans] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let user = auth.currentUser;
+        if (!user) { try { await signInAnonymously(auth); user = auth.currentUser; } catch (_) { /* ignore */ } }
+        const uid = user?.uid;
+        if (!uid) { setPastFlatPlans([]); return; }
+        const runs = (recentRuns || []).filter(r => r && r.id && r.id !== latestRunId);
+        if (!runs.length) { setPastFlatPlans([]); return; }
+        // Fetch plans for each run (desc)
+        const plansArrays = await Promise.all(runs.map(async (run) => {
+          try {
+            const qref = query(collection(db, 'users', uid, 'planRuns', run.id, 'suggestedPlans'), orderBy('createdAt', 'desc'));
+            const snap = await getDocs(qref);
+            return snap.docs.map(d => ({ id: d.id, runId: run.id, ...d.data() }));
+          } catch (e) {
+            console.warn('[pastFlat] fetch failed for run', run.id, e?.message || e);
+            return [];
+          }
+        }));
+        const flat = plansArrays.flat().filter(p => !p.placeholder);
+        // Deduplicate by url if present, else by planName+eventName
+        const seen = new Set();
+        const out = [];
+        for (const p of flat) {
+          const key = p.url || `${p.planName}__${p.eventName}`;
+          if (key && !seen.has(key)) { seen.add(key); out.push(p); }
+        }
+        if (!cancelled) setPastFlatPlans(out);
+      } catch (e) {
+        if (!cancelled) setPastFlatPlans([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [auth, db, recentRuns, latestRunId]);
+
   // Mark last opened time for unread badge logic (Phase 5)
   useFocusEffect(
     useCallback(() => {
@@ -186,6 +250,7 @@ const SuggestedPlansScreen = ({ navigation }) => {
           let user = auth.currentUser;
           if (!user) { await signInAnonymously(auth); user = auth.currentUser; }
           if (!user || !active) return;
+          // Always update timestamp for fallback/analytics
           await setDoc(doc(db, 'users', user.uid), { suggestedLastOpenedAt: serverTimestamp() }, { merge: true });
         } catch (e) {
           console.warn('[SuggestedPlans] mark last opened failed:', e?.message || e);
@@ -194,6 +259,33 @@ const SuggestedPlansScreen = ({ navigation }) => {
       return () => { active = false; };
     }, [auth, db])
   );
+
+  // Mark a single plan as read when user taps "詳細を見る"
+  const markPlanRead = useCallback(async (plan) => {
+    try {
+      if (!SUGGESTED_UNREAD_BY_FLAG) return; // only in flag mode
+      let user = auth.currentUser;
+      if (!user) { await signInAnonymously(auth); user = auth.currentUser; }
+      if (!user) return;
+      const uid = user.uid;
+      const runId = viewingRunId || latestRunId || null;
+      if (plan?.id) {
+        if (runId) {
+          try { await setDoc(doc(db, 'users', uid, 'planRuns', runId, 'suggestedPlans', String(plan.id)), { readAt: serverTimestamp() }, { merge: true }); } catch (_) {}
+        }
+        try { await setDoc(doc(db, 'users', uid, 'suggestedPlans', String(plan.id)), { readAt: serverTimestamp() }, { merge: true }); } catch (_) {}
+      }
+      // Optimistic UI
+      setPlans((prev) => prev.map(p => (p.id === plan.id ? { ...p, readAt: p.readAt || new Date() } : p)));
+      setExpandedPlansMap((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach(k => { next[k] = (next[k] || []).map(p => (p.id === plan.id ? { ...p, readAt: p.readAt || new Date() } : p)); });
+        return next;
+      });
+    } catch (e) {
+      console.warn('[SuggestedPlans] markPlanRead failed:', e?.message || e);
+    }
+  }, [auth, db, viewingRunId, latestRunId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -239,6 +331,14 @@ const SuggestedPlansScreen = ({ navigation }) => {
           unsubRuns = onSnapshot(recentRunsQ, (snap) => {
             const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             if (isMounted) setRecentRuns(items);
+            // Keep latestRunId synced with newest snapshot result
+            const newLatestId = items[0]?.id || null;
+            const prevLatest = latestRunIdRef.current;
+            if (newLatestId && newLatestId !== prevLatest) {
+              if (isMounted) setLatestRunId(newLatestId);
+              // If viewing latest or not set, follow to the new latest
+              if (isMounted) setViewingRunId((cur) => (!cur || cur === prevLatest) ? newLatestId : cur);
+            }
           }, (err) => console.warn('[firestore] planRuns onSnapshot error:', err));
         }
 
@@ -273,8 +373,10 @@ const SuggestedPlansScreen = ({ navigation }) => {
   // viewingRunId / route の変化で再実行
   }, [auth, db, viewingRunId, route?.params?.runId]);
   
-  const handleShowDetails = (plan) => {
+  const handleShowDetails = (plan, runId = null) => {
+    if (plan) { markPlanRead(plan, runId); }
     setSelectedPlan(plan);
+    setSelectedPlanRunId(runId);
     setModalVisible(true);
   };
 
@@ -285,6 +387,8 @@ const SuggestedPlansScreen = ({ navigation }) => {
     }
     setIsPlanning(selectedPlan.url);
     try {
+      // Mark this plan as read (again, in case modal entry skipped it)
+      await markPlanRead(selectedPlan, selectedPlanRunId);
       let user = auth.currentUser;
       if (!user) {
         console.log("ユーザーが未認証のため、匿名サインインを試みます...");
@@ -315,60 +419,152 @@ const SuggestedPlansScreen = ({ navigation }) => {
     }
   };
 
+  // Build lists BEFORE any early return to keep hook order stable
+  const mergedPlans = useMemo(() => [
+    ...plans.slice(FEATURED_N),
+    ...pastFlatPlans,
+  ], [plans, pastFlatPlans]);
+  const listData = useMemo(() => [{ __type: 'rail' }, { __type: 'listTitle' }, ...mergedPlans], [mergedPlans]);
+
   if (isLoading) {
-    return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
+    return (
+      <View style={styles.container}>
+        <View style={styles.pageHeader}>
+          <Text style={styles.pageTitle}>✨ 提案</Text>
+        </View>
+        <View style={styles.introCard}> 
+          <Text style={styles.introText}>あなたの関心や移動手段に合わせて、AIが「今日行けるお出かけプラン」を提案します。</Text>
+          <View style={[styles.ctaButton, { opacity: 0.6, alignSelf: 'flex-start' }]}>
+            <Ionicons name="map-outline" size={20} color="#fff" />
+            <Text style={styles.ctaButtonText}>AIとお出かけプランを立てる</Text>
+          </View>
+        </View>
+        {/* Simple shimmer-like placeholders */}
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+          <Text style={styles.sectionTitle}>🆕 最新のAIプラン</Text>
+          <View style={{ height: 200, marginTop: 8 }}>
+            <ShimmerRow count={3} width={CARD_W} height={180} spacing={CARD_SPACING} />
+          </View>
+        </View>
+        <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
+          <ShimmerList count={3} />
+        </View>
+      </View>
+    );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={28} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.title}>生成されたプラン候補</Text>
-        <View style={{ width: 36 }} />
-      </View>
-
-      <View style={styles.switchBar}>
-        <Text style={styles.switchBarText}>
-          {viewingRunId && latestRunId && viewingRunId !== latestRunId ? '過去のプランを表示中' : '最新のプランを表示中'}
-        </Text>
-        {latestRunId && viewingRunId && viewingRunId !== latestRunId && (
-          <TouchableOpacity onPress={() => setViewingRunId(latestRunId)} style={styles.switchButton}>
-            <Text style={styles.switchButtonText}>最新を表示</Text>
-          </TouchableOpacity>
+      <Animated.FlatList
+        data={listData}
+        keyExtractor={(item, index) => item.__type ? `${item.__type}-${index}` : `${item.url || item.id || 'plan'}-${index}`}
+        stickyHeaderIndices={[1]}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        scrollEventThrottle={16}
+        contentContainerStyle={styles.listContainer}
+        ListHeaderComponent={(
+          <Animated.View style={styles.heroWrap}> 
+            <Animated.View style={[styles.heroGlass, { opacity: heroOpacity }]} onLayout={(e) => { if (!heroMinH) setHeroMinH(e.nativeEvent.layout.height); }}>
+              <Text style={styles.heroKicker}>週末のプランを作成しよう！</Text>
+              <Animated.View style={{ opacity: heroOpacity, marginTop: 2 }}>
+                <View style={styles.stepRow}>
+                  <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>1</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.stepTitle}>お出かけプランを立てる</Text>
+                    <TouchableOpacity style={[styles.ctaButton, !!isPlanning && { opacity: 0.7 }]} onPress={() => navigation.navigate('Plan')} disabled={!!isPlanning}>
+                      <Ionicons name="map-outline" size={20} color="#fff" />
+                      <Text style={styles.ctaButtonText}>{isPlanning ? '生成中…' : 'AIとお出かけプランを立てる'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={styles.stepDivider} />
+                <View style={styles.stepRow}>
+                  <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>2</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.stepTitle}>生成されたプランを見て決定</Text>
+                    <Text style={styles.stepHint}>NEWの付いたプランから中身をチェックして選びましょう</Text>
+                  </View>
+                </View>
+              </Animated.View>
+            </Animated.View>
+          </Animated.View>
         )}
-      </View>
-
-      {plans.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.emptyText}>プラン候補はまだありません。</Text>
-          <Text style={styles.emptySubText}>プランを生成すると、ここに表示されます。</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={plans}
-          keyExtractor={(item, index) => `${item.url}-${index}`}
-          contentContainerStyle={styles.listContainer}
-          renderItem={({ item }) => (
-            <View style={styles.planCard}>
-              <Image source={{ uri: item.imageUrl || 'https://placehold.co/600x400' }} style={styles.cardImage} />
-              <View style={styles.cardContent}>
-                <Text style={styles.planTitle}>{item.planName}</Text>
-                <Text style={styles.planEvent}>{item.eventName}</Text>
-                <Text style={styles.planSummary} numberOfLines={3}>{item.summary}</Text>
-                <TouchableOpacity 
-                  style={styles.decisionButton} 
-                  onPress={() => handleShowDetails(item)}
-                >
-                  <Text style={styles.buttonText}>詳細を見る →</Text>
-                </TouchableOpacity>
+        renderItem={({ item }) => {
+          if (item.__type === 'rail') {
+            return (
+              <View style={styles.railSticky}>
+                <View style={styles.railTitleWrap}>
+                  <Text style={styles.sectionTitle}>🆕 最新のAIプラン</Text>
+                </View>
+                <View style={styles.railBody}>
+                  <FlatList
+                    data={plans.slice(0, FEATURED_N)}
+                    keyExtractor={(it, idx) => `featured-${it.url || it.id || idx}`}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    snapToInterval={CARD_W + CARD_SPACING}
+                    decelerationRate="fast"
+                    snapToAlignment="start"
+                    contentContainerStyle={{ paddingHorizontal: 16 }}
+                    ItemSeparatorComponent={() => <View style={{ width: CARD_SPACING }} />}
+                    renderItem={({ item: it }) => (
+                      <TouchableOpacity activeOpacity={0.85} onPress={() => handleShowDetails(it, viewingRunId)}>
+                        <View style={[styles.featuredCard, { width: CARD_W }]}>
+                          <Image source={{ uri: it.imageUrl || 'https://placehold.co/600x400' }} style={styles.featuredImage} />
+                          <View style={styles.featuredBody}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <Text style={styles.featuredTitle} numberOfLines={1}>{it.planName}</Text>
+                              {SUGGESTED_UNREAD_BY_FLAG && !it.readAt ? (
+                                <View style={[styles.newPill, { marginLeft: 6 }]}><Text style={styles.newPillText}>NEW</Text></View>
+                              ) : null}
+                            </View>
+                            <Text style={styles.featuredSub} numberOfLines={1}>{it.eventName}</Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                  />
+                </View>
               </View>
-            </View>
-          )}
-          ListFooterComponent={renderPastRunsFooter}
-        />
-      )}
+            );
+          }
+          if (item.__type === 'listTitle') {
+            return (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: '#F7F7F7' }}>
+                <Text style={styles.sectionTitle}>📋 プラン一覧</Text>
+              </View>
+            );
+          }
+          // Plan rows
+          const p = item;
+          return (
+            <TouchableOpacity activeOpacity={0.85} onPress={() => handleShowDetails(p, p.runId || viewingRunId)}>
+              <View style={styles.compactRow}>
+                {p.imageUrl ? (
+                  <Image source={{ uri: p.imageUrl }} style={styles.thumb} />
+                ) : (
+                  <View style={styles.thumbPlaceholder}><Ionicons name="image-outline" size={20} color="#999" /></View>
+                )}
+                <View style={styles.compactContent}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Text style={styles.compactTitle} numberOfLines={1}>{p.planName}</Text>
+                    {SUGGESTED_UNREAD_BY_FLAG && !p.readAt ? (
+                      <View style={[styles.newPill, { marginLeft: 6 }]}><Text style={styles.newPillText}>NEW</Text></View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.compactPreview} numberOfLines={2}>{p.summary}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+        ListEmptyComponent={(
+          <View style={styles.centered}>
+            <Text style={styles.emptyText}>プラン候補はまだありません。</Text>
+            <Text style={styles.emptySubText}>プランを生成すると、ここに表示されます。</Text>
+          </View>
+        )}
+      />
 
       {selectedPlan && (
         <Modal
@@ -440,9 +636,47 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 16, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#EEE' },
   backButton: { padding: 4 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  pageHeader: { paddingHorizontal: 16, paddingTop: 8 },
+  pageTitle: { fontSize: 28, fontWeight: '900', color: '#222' },
+  heroWrap: { marginHorizontal: -16, paddingTop: 8, marginBottom: 12, overflow: 'hidden' },
+  heroGlass: { marginHorizontal: 16, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)', backgroundColor: 'rgba(255,255,255,0.85)', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroChip: { backgroundColor: '#0EA5E9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
+  heroChipText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  heroSub: { color: '#555', fontSize: 13, marginTop: 2 },
+  heroKicker: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 6 },
+  introCard: { backgroundColor: '#FFFFFF', margin: 16, marginBottom: 8, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
+  introTitle: { fontSize: 14, fontWeight: '800', color: '#333', marginBottom: 6 },
+  introText: { fontSize: 13, color: '#555', lineHeight: 20, marginBottom: 10 },
+  ctaButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FF6347', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
+  ctaButtonText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   emptyText: { fontSize: 18, color: 'gray', textAlign: 'center' },
   emptySubText: { fontSize: 14, color: '#A0A0A0', marginTop: 8, textAlign: 'center' },
   listContainer: { padding: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#333' },
+  compactRow: {
+    flexDirection: 'row', alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    borderWidth: 1, borderColor: '#EEE',
+    overflow: 'hidden'
+  },
+  thumb: { width: 92, height: 92, backgroundColor: '#f2f2f2' },
+  thumbPlaceholder: { width: 92, height: 92, backgroundColor: '#f2f2f2', alignItems: 'center', justifyContent: 'center' },
+  compactContent: { flex: 1, minHeight: 92, justifyContent: 'center', paddingHorizontal: 12 },
+  compactTitle: { fontSize: 15, fontWeight: '800', color: '#222' },
+  compactPreview: { marginTop: 4, fontSize: 12, color: '#555' },
+  featuredCard: { backgroundColor: '#FFF', borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#EEE' },
+  featuredImage: { width: '100%', height: 140, backgroundColor: '#f0f0f0' },
+  featuredBody: { padding: 10 },
+  featuredTitle: { fontSize: 16, fontWeight: '800', color: '#222' },
+  featuredSub: { fontSize: 12, color: '#666', marginTop: 2 },
+  railSticky: { backgroundColor: '#F7F7F7', paddingBottom: 8 },
+  railTitleWrap: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 8, backgroundColor: '#F7F7F7' },
+  railBody: { height: 210, backgroundColor: '#F7F7F7' },
+  fadeLeft: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 24 },
+  fadeRight: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 24 },
   planCard: { backgroundColor: 'white', borderRadius: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5, overflow: 'hidden' },
   cardImage: { width: '100%', height: 180 },
   cardContent: { padding: 16 },
@@ -500,6 +734,53 @@ const styles = StyleSheet.create({
   smallPlanSummary: { fontSize: 12, color: '#666', marginTop: 4 },
   smallDetailBtn: { alignSelf: 'flex-start', marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#007AFF', borderRadius: 8 },
   smallDetailBtnText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  newPill: { marginLeft: 8, backgroundColor: '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, alignSelf: 'flex-start' },
+  newPillText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  // Steps UI
+  stepRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12, marginTop: 10 },
+  stepBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFE4DE', alignItems: 'center', justifyContent: 'center' },
+  stepBadgeText: { color: '#FF6347', fontWeight: '800' },
+  stepTitle: { fontSize: 14, fontWeight: '800', color: '#333', marginBottom: 8 },
+  stepHint: { fontSize: 12, color: '#666' },
+  stepDivider: { height: 1, backgroundColor: '#EEE', marginTop: 6 },
 });
 
-export default SuggestedPlansScreen;
+export default SuggestedPlansScreen; 
+ 
+// --- Simple shimmer placeholders (pulse opacity) ---
+function ShimmerRow({ count = 3, width = 280, height = 160, spacing = 12 }) {
+  const items = new Array(count).fill(0);
+  return (
+    <View style={{ flexDirection: 'row', paddingHorizontal: 16 }}>
+      {items.map((_, i) => (
+        <PulseBlock key={i} style={{ width, height, marginRight: i === count - 1 ? 0 : spacing, borderRadius: 14 }} />
+      ))}
+    </View>
+  );
+}
+
+function ShimmerList({ count = 3 }) {
+  const items = new Array(count).fill(0);
+  return (
+    <View style={{ gap: 12 }}>
+      {items.map((_, i) => (
+        <PulseBlock key={i} style={{ height: 180, borderRadius: 16 }} />
+      ))}
+    </View>
+  );
+}
+
+function PulseBlock({ style }) {
+  const opacity = React.useRef(new Animated.Value(0.6)).current;
+  React.useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.6, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.View style={[{ backgroundColor: '#ECECEC', opacity }, style]} />;
+}

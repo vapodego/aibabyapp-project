@@ -589,6 +589,7 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 24 },
   section: { paddingHorizontal: 16, paddingTop: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 8 },
+  pageTitle: { fontSize: 26, fontWeight: '900', color: '#111827' },
   recoWrap: { gap: 12, marginBottom: 8, paddingVertical: 4 },
   heroCard: {},
   card: {

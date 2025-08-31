@@ -199,13 +199,7 @@ export default function ChatScreen({ navigation, route }) {
                         </TouchableOpacity>
                     </View>
                 </View>
-                {renderStatusBanner()}
-                <View style={styles.planningActionContainer}>
-                    <TouchableOpacity style={styles.planningButton} onPress={() => navigation.navigate('Plan')}>
-                        <Ionicons name="map-outline" size={24} color="white" />
-                        <Text style={styles.planningButtonText}>AIとお出かけプランをたてる</Text>
-                    </TouchableOpacity>
-                </View>
+                {/* 提案タブへ移動：プランCTAとステータスバナーは提案タブに移設 */}
 
                 <View style={styles.suggestionSection}>
                     <View style={styles.sectionHeader}>
