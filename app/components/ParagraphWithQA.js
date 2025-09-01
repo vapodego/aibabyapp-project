@@ -113,14 +113,15 @@ export default function ParagraphWithQA({
                                 style={{ flex: 1 }}
                               >
                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  <InlineMD
-                                    text={display}
-                                    style={[
-                                      styles.answerSentence,
-                                      { paddingVertical: 4 },
-                                      (key === normalizeKey(selectedSentence) || (Array.isArray(childAnswersBySentence?.[key]) && childAnswersBySentence[key].length > 0)) && (styles.selectedAnswer || styles.selectedSentence)
-                                    ]}
-                                  />
+                                  {(() => { 
+                                    let cnt = 0; try { cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0; } catch {}
+                                    const isOpen = !!expandedNestedSentences?.[key];
+                                    const isSel = key === normalizeKey(selectedSentence);
+                                    const sty = [styles.answerSentence, { paddingVertical: 4 }];
+                                    if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
+                                    else if (cnt > 0 && !isOpen) sty.push(styles.answeredUnderline);
+                                    return (<InlineMD text={display} style={sty} />);
+                                  })()}
                                   {(() => { try {
                                     const cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0;
                                     return cnt > 0 ? (<Text style={styles.countBadge}>💬 {cnt}</Text>) : null;
@@ -134,6 +135,16 @@ export default function ParagraphWithQA({
                             {/* L2（child）: 最新回答行の直下に子回答を表示（縦積み） */}
                             {expandedNestedSentences?.[key] ? (
                               <View style={[styles.nestedBlock, { marginLeft: (hadBullet ? 22 : 16) }]}> 
+                                {(() => { try {
+                                  const list = childAnswersBySentence?.[key] || [];
+                                  const first = list[0] || null;
+                                  const qtext = first && first.question ? String(first.question) : '';
+                                  return qtext ? (
+                                    <View style={styles.nestedHeader}>
+                                      <Text style={styles.nestedIcon}>💬</Text>
+                                      <Text numberOfLines={1} style={styles.nestedSummary}>Q: {qtext}</Text>
+                                    </View>
+                                  ) : null; } catch (_) { return null; } })()}
                                 <View style={styles.nestedBody}>
                                   {(childAnswersBySentence?.[key] || []).map((cqa, m) => (
                                     <View key={m} style={{ marginBottom: 4 }}>

@@ -866,6 +866,8 @@ const styles = StyleSheet.create({
   selectedAnswer: { backgroundColor: '#FFF5D6', borderRadius: 6, paddingHorizontal: 4 },
   // 行末のコメント数バッジ
   countBadge: { fontSize: 12, color: '#6B7280', marginLeft: 8 },
+  // 回答があるが閉じている行の下線（視認用）
+  answeredUnderline: { textDecorationLine: 'underline', textDecorationColor: '#6C54FF' },
 
   contextBar: {
     borderTopWidth: 1,
