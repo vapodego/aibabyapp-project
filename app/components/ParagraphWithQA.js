@@ -78,58 +78,40 @@ export default function ParagraphWithQA({
                         const sent = display; // 保存・選択用も display に統一
                         const hadBullet = display !== line; // 行頭の記号が除去されたかで判定（簡易）
                         return (
-                          <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                            {hadBullet ? (
-                              <Text style={[styles.answerSentence, { paddingVertical: 4, marginRight: 6 }]}>•</Text>
-                            ) : null}
-                            <TouchableOpacity
-                              activeOpacity={0.7}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                              accessibilityRole="button"
-                              accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(latest && typeof latest.depth === 'number') ? latest.depth : 1}です`}
-                              onPress={() => {
-                                const baseDepth = (latest && typeof latest.depth === 'number') ? latest.depth : 1;
-                                const asKey = key; // 正規化キーは常にこれを使用
+                          <View key={i} style={{ marginBottom: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                              {hadBullet ? (
+                                <Text style={[styles.answerSentence, { paddingVertical: 4, marginRight: 6 }]}>•</Text>
+                              ) : null}
+                              <TouchableOpacity
+                                activeOpacity={0.7}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="button"
+                                accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(latest && typeof latest.depth === 'number') ? latest.depth : 1}です`}
+                                onPress={() => {
+                                  const baseDepth = (latest && typeof latest.depth === 'number') ? latest.depth : 1;
+                                  const asKey = key; // 正規化キー
+                                  try {
+                                    const childCount = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0;
+                                    const expanded = !!expandedNestedSentences?.[asKey];
+                                    onDebug?.({ tag: 'tap-answer', as: display, asKey, childCount, expanded, debugChildKeysCount: (debugChildKeys || []).length, debugExpandedKeysCount: (debugExpandedKeys || []).length });
+                                  } catch {}
+                                  onPressAnswerSentence?.(sent, baseDepth);
+                                  try {
+                                    const isExpandedNow = !!expandedNestedSentences?.[asKey];
+                                    if (!isExpandedNow) onToggleNestedExpand?.(asKey);
+                                  } catch {}
+                                }}
+                                style={{ flex: 1 }}
+                              >
+                                <InlineMD
+                                  text={display}
+                                  style={[styles.answerSentence, { paddingVertical: 4 }, key === normalizeKey(selectedSentence) && styles.selectedSentence]}
+                                />
+                              </TouchableOpacity>
+                            </View>
 
-                                // Debug: report keys/counts at tap time
-                                try {
-                                  const childCount = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0;
-                                  const expanded = !!expandedNestedSentences?.[asKey];
-                                  onDebug?.({
-                                    tag: 'tap-answer',
-                                    as: display,
-                                    asKey,
-                                    childCount,
-                                    expanded,
-                                    debugChildKeysCount: (debugChildKeys || []).length,
-                                    debugExpandedKeysCount: (debugExpandedKeys || []).length,
-                                  });
-                                } catch {}
-
-                                // まず質問を投げる（display は表示用、キーはサーバで normKey に変換）
-                                onPressAnswerSentence?.(sent, baseDepth);
-
-                                // 未展開のときだけ自動で開く（毎回トグルしない）
-                                try {
-                                  const isExpandedNow = !!expandedNestedSentences?.[asKey];
-                                  if (!isExpandedNow) {
-                                    onToggleNestedExpand?.(asKey);
-                                  }
-                                } catch {}
-                              }}
-                              style={{ flex: 1 }}
-                            >
-                              <InlineMD
-                                text={display}
-                                style={[
-                                  styles.answerSentence,
-                                  { paddingVertical: 4 },
-                                  key === normalizeKey(selectedSentence) && styles.selectedSentence,
-                                ]}
-                              />
-                            </TouchableOpacity>
-
-                            {/* L2（child）: 最新回答行の直下に子回答を表示 */}
+                            {/* L2（child）: 最新回答行の直下に子回答を表示（縦積み） */}
                             {expandedNestedSentences?.[key] ? (
                               <View style={{ marginLeft: hadBullet ? 22 : 16, marginTop: 6 }}>
                                 {(childAnswersBySentence?.[key] || []).map((cqa, m) => (
@@ -159,10 +141,7 @@ export default function ParagraphWithQA({
                                                 }}
                                                 style={{ flex: 1 }}
                                               >
-                                                <InlineMD
-                                                  text={as2}
-                                                  style={[styles.answerSentence, { paddingVertical: 4 }, as2Key === normalizeKey(selectedSentence) && styles.selectedSentence]}
-                                                />
+                                                <InlineMD text={as2} style={[styles.answerSentence, { paddingVertical: 4 }, as2Key === normalizeKey(selectedSentence) && styles.selectedSentence]} />
                                               </TouchableOpacity>
                                             </View>
 
