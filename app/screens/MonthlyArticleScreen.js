@@ -868,6 +868,8 @@ const styles = StyleSheet.create({
   nestedToggle: { fontSize: 12, color: '#6C54FF', marginLeft: 8 },
   nestedBody: { paddingHorizontal: 10, paddingBottom: 8 },
   qaItemNested: { marginTop: 6 },
+  // 選択した回答行の下線
+  selectedAnswer: { textDecorationLine: 'underline', textDecorationColor: '#6C54FF' },
 
   contextBar: {
     borderTopWidth: 1,

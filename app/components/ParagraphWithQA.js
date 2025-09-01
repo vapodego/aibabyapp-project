@@ -97,19 +97,35 @@ export default function ParagraphWithQA({
                                     onDebug?.({ tag: 'tap-answer', as: display, asKey, childCount, expanded, debugChildKeysCount: (debugChildKeys || []).length, debugExpandedKeysCount: (debugExpandedKeys || []).length });
                                   } catch {}
                                   onPressAnswerSentence?.(sent, baseDepth);
-                                  try {
-                                    const isExpandedNow = !!expandedNestedSentences?.[asKey];
-                                    if (!isExpandedNow) onToggleNestedExpand?.(asKey);
-                                  } catch {}
                                 }}
                                 style={{ flex: 1 }}
                               >
                                 <InlineMD
                                   text={display}
-                                  style={[styles.answerSentence, { paddingVertical: 4 }, key === normalizeKey(selectedSentence) && styles.selectedSentence]}
+                                  style={[styles.answerSentence, { paddingVertical: 4 }, key === normalizeKey(selectedSentence) && (styles.selectedAnswer || styles.selectedSentence)]}
                                 />
                               </TouchableOpacity>
                             </View>
+
+                            {/* L2 折りたたみ表示（ひらく）: 子回答があるが閉じている場合にヒント行を表示 */}
+                            {(() => {
+                              try {
+                                const cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0;
+                                const open = !!expandedNestedSentences?.[key];
+                                if (cnt > 0 && !open) {
+                                  return (
+                                    <View style={[styles.nestedHeader, { paddingHorizontal: 8, paddingVertical: 4, marginLeft: hadBullet ? 22 : 16 }] }>
+                                      <Text style={styles.nestedIcon}>💬</Text>
+                                      <Text numberOfLines={1} style={styles.nestedSummary}>追回答 {cnt}件</Text>
+                                      <TouchableOpacity onPress={() => onToggleNestedExpand?.(key)}>
+                                        <Text style={styles.nestedToggle}>ひらく</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  );
+                                }
+                              } catch(_) {}
+                              return null;
+                            })()}
 
                             {/* L2（child）: 最新回答行の直下に子回答を表示（縦積み） */}
                             {expandedNestedSentences?.[key] ? (
@@ -193,7 +209,26 @@ export default function ParagraphWithQA({
                                                   </View>
                                                 ))}
                                               </View>
-                                            ) : null}
+                                            ) : (
+                                              // L3 折りたたみ表示（ひらく）: 孫回答があるが閉じている場合
+                                              (() => {
+                                                try {
+                                                  const gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0;
+                                                  if (gcnt > 0) {
+                                                    return (
+                                                      <View style={[styles.nestedHeader, { paddingHorizontal: 8, paddingVertical: 4, marginLeft: hadBullet2 ? 22 : 16 }] }>
+                                                        <Text style={styles.nestedIcon}>↳</Text>
+                                                        <Text numberOfLines={1} style={styles.nestedSummary}>さらに {gcnt} 件</Text>
+                                                        <TouchableOpacity onPress={() => onToggleGrandNestedExpand?.(as2Key)}>
+                                                          <Text style={styles.nestedToggle}>ひらく</Text>
+                                                        </TouchableOpacity>
+                                                      </View>
+                                                    );
+                                                  }
+                                                } catch(_) {}
+                                                return null;
+                                              })()
+                                            )}
                                           </View>
                                         );
                                       })}
