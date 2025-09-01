@@ -52,7 +52,7 @@ export default function ParagraphWithQA({
                 style={[
                   styles.paragraphSentence,
                   s === selectedSentence && styles.selectedSentence,
-                  (!isExpanded && qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
+                  (qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
                 ]}
               >
                 {s}
@@ -120,7 +120,7 @@ export default function ParagraphWithQA({
                                   const isSel = key === normalizeKey(selectedSentence);
                                   const sty = [styles.answerSentence, { paddingVertical: 4 }];
                                   if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
-                                  else if (cnt > 0 && !isOpen) sty.push(styles.answeredUnderline);
+                                  else if (cnt > 0) sty.push(styles.answeredUnderline);
                                   const suffix = (!isOpen && cnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {cnt}</Text>) : null;
                                   return (<InlineMD text={display} style={sty} suffix={suffix} />);
                                 })()}
@@ -173,14 +173,16 @@ export default function ParagraphWithQA({
                                                 style={{ flex: 1 }}
                                               >
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                  <InlineMD
-                                                    text={as2}
-                                                    style={[
-                                                      styles.answerSentence,
-                                                      { paddingVertical: 4 },
-                                                      (as2Key === normalizeKey(selectedSentence) || (Array.isArray(grandAnswersBySentence?.[as2Key]) && grandAnswersBySentence[as2Key].length > 0)) && (styles.selectedAnswer || styles.selectedSentence)
-                                                    ]}
-                                                  />
+                                                  {(() => {
+                                                    let gcnt = 0; try { gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0; } catch {}
+                                                    const gOpen = !!expandedGrandNested?.[as2Key];
+                                                    const isSel = as2Key === normalizeKey(selectedSentence);
+                                                    const sty = [styles.answerSentence, { paddingVertical: 4 }];
+                                                    if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
+                                                    else if (gcnt > 0) sty.push(styles.answeredUnderline);
+                                                    const suffix = (!gOpen && gcnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {gcnt}</Text>) : null;
+                                                    return (<InlineMD text={as2} style={sty} suffix={suffix} />);
+                                                  })()}
                                                   {(() => { try {
                                                     const gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0;
                                                     return gcnt > 0 ? (<Text style={styles.countBadge}>💬 {gcnt}</Text>) : null;

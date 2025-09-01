@@ -871,7 +871,7 @@ const styles = StyleSheet.create({
   // 選択した回答行のハイライト（本文と統一の黄色）
   selectedAnswer: { backgroundColor: '#FFF5D6', borderRadius: 6, paddingHorizontal: 4 },
   // 行末のコメント数バッジ
-  countBadge: { fontSize: 12, color: '#4F46E5', marginLeft: 8, backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, fontWeight: '700', flexShrink: 0 },
+  countBadge: { fontSize: 14, color: '#4F46E5', marginLeft: 8, backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, fontWeight: '700', flexShrink: 0 },
   // 回答があるが閉じている行の下線（視認用）
   answeredUnderline: { textDecorationLine: 'underline', textDecorationColor: '#6C54FF' },
 
