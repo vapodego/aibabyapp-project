@@ -176,15 +176,20 @@ export default function MonthlyArticleScreen() {
             // Prefer server-provided normKey/display if available
             const display2 = String(d?.selection?.display || d?.selection?.quote || '');
             const key2 = d?.selection?.normKey || (display2 ? normalizeKey(display2) : null);
-            if (!key2) return; // 深掘り対象の回答文が無ければスキップ
+            if (!key2 && !display2) return; // 深掘り対象の回答文が無ければスキップ
             qa.selectedSentence = display2; // UI 表示用は display を採用
-            byChild[key2] = [qa, ...(byChild[key2] || [])];
+            if (key2) byChild[key2] = [qa, ...(byChild[key2] || [])];
+            // 互換キー（空白除去版）も併置してキー不一致を回避
+            const alt2 = display2 ? normalizeKey(display2) : '';
+            if (alt2 && alt2 !== key2) byChild[alt2] = [qa, ...(byChild[alt2] || [])];
           } else {
             const display3 = String(d?.selection?.display || d?.selection?.quote || '');
             const key3 = d?.selection?.normKey || (display3 ? normalizeKey(display3) : null);
-            if (!key3) return;
+            if (!key3 && !display3) return;
             qa.selectedSentence = display3; // UI 表示用は display を採用
-            byGrand[key3] = [qa, ...(byGrand[key3] || [])];
+            if (key3) byGrand[key3] = [qa, ...(byGrand[key3] || [])];
+            const alt3 = display3 ? normalizeKey(display3) : '';
+            if (alt3 && alt3 !== key3) byGrand[alt3] = [qa, ...(byGrand[alt3] || [])];
           }
         });
         setAnswersBySentence(prev => ({ ...prev, ...bySentence }));
