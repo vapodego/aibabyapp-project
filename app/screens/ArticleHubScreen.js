@@ -61,6 +61,12 @@ export default function ArticleHubScreen() {
   const functions = useMemo(() => getFunctions(getApp(), 'asia-northeast1'), []);
   const CF_BASE = 'https://asia-northeast1-aibabyapp-abeae.cloudfunctions.net';
 
+  // ヒーローのフェード設定（スクロールに応じて薄く）
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const heroFadeRange = 140; // 調整ポイント: 早める=120/100, 遅らせる=160〜180
+  const clampedY = Animated.diffClamp(scrollY, 0, heroFadeRange);
+  const heroOpacity = clampedY.interpolate({ inputRange: [0, heroFadeRange], outputRange: [1, 0], extrapolate: 'clamp' });
+
   const withGenerating = (id, fn) => async () => {
     setGenerating(prev => new Set(prev).add(id));
     try { await fn(); }
@@ -459,8 +465,8 @@ export default function ArticleHubScreen() {
     );
   }, [navigation, ensureImage, generating]);
 
-  const ListHeader = useMemo(() => (
-    <View style={styles.headerWrap}>
+  const HeroHeader = useMemo(() => (
+    <Animated.View style={[styles.headerWrap, { opacity: heroOpacity }]}>
       {/* 上部スペース＋ユーティリティバー */}
       <View style={styles.topSpacer} />
       <View style={styles.toolbar}>
@@ -504,30 +510,11 @@ export default function ArticleHubScreen() {
           </View>
         )}
       </View>
+    </Animated.View>
+  ), [search, recentCount, totalCount, lastUpdatedText, seeding, creating, heroOpacity]);
 
-      {/* おすすめセクション */}
-      <Text style={styles.sectionTitle}>🆕 今日のおすすめ</Text>
-      <View style={styles.recoWrap}>
-        {recommended.length > 0 ? (
-          <FlatList
-            data={recommended}
-            keyExtractor={(it) => it.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingRight: 8 }}
-            ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
-            renderItem={({ item }) => (
-              <View style={{ width: 300 }}>{renderCard(item, true)}</View>
-            )}
-          />
-        ) : (
-          <Text style={styles.emptyText}>おすすめ記事がまだありません</Text>
-        )}
-      </View>
-
-      <Text style={[styles.sectionTitle, { marginTop: 8 }]}>📚 記事一覧</Text>
-    </View>
-  ), [recommended, renderCard, search, recentCount, totalCount, lastUpdatedText, seeding]);
+  // Sticky rail + list title + articles
+  const listData = useMemo(() => [{ __type: 'rail' }, { __type: 'listTitle' }, ...(filteredArticles || [])], [filteredArticles]);
 
   if (loading && !articles.length) {
     return (
@@ -569,12 +556,45 @@ export default function ArticleHubScreen() {
         </View>
       </Modal>
 
-      <FlatList
-        data={filteredArticles}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={ListHeader}
-        renderItem={({ item }) => renderCard(item)}
+      <Animated.FlatList
+        data={listData}
+        keyExtractor={(item, index) => item?.__type ? `${item.__type}-${index}` : `${item.id}`}
+        ListHeaderComponent={HeroHeader}
+        style={styles.listBg}
+        renderItem={({ item }) => {
+          if (item?.__type === 'rail') {
+            return (
+              <View style={styles.railStickyWrap}>
+                <Text style={[styles.sectionTitle, { marginHorizontal: 16 }]}>🆕 今日のおすすめ</Text>
+                <View style={[styles.recoWrap, { paddingTop: 4 }]}> 
+                  {recommended.length > 0 ? (
+                    <FlatList
+                      data={recommended}
+                      keyExtractor={(it) => it.id}
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ paddingRight: 8 }}
+                      ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+                      renderItem={({ item: it }) => (
+                        <View style={{ width: 300 }}>{renderCard(it, true)}</View>
+                      )}
+                    />
+                  ) : (
+                    <Text style={[styles.emptyText, { marginHorizontal: 16 }]}>おすすめ記事がまだありません</Text>
+                  )}
+                </View>
+              </View>
+            );
+          }
+          if (item?.__type === 'listTitle') {
+            return <Text style={[styles.sectionTitle, { marginTop: 8, marginHorizontal: 16 }]}>📚 記事一覧</Text>;
+          }
+          return renderCard(item);
+        }}
         contentContainerStyle={styles.listContent}
+        stickyHeaderIndices={[1]}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        scrollEventThrottle={16}
         onEndReachedThreshold={0.2}
         onEndReached={fetchNextPage}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -589,8 +609,16 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 24 },
   section: { paddingHorizontal: 16, paddingTop: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 8 },
+  emptyText: { fontSize: 14, color: '#A0A0A0', textAlign: 'left' },
   pageTitle: { fontSize: 26, fontWeight: '900', color: '#111827' },
   recoWrap: { gap: 12, marginBottom: 8, paddingVertical: 4 },
+  listBg: { backgroundColor: '#FAFAFA' },
+  railStickyWrap: {
+    backgroundColor: '#FAFAFA',
+    paddingBottom: 6,
+    // 下にスクロールする一覧が透けて見えないよう、背景のみを維持（線/影なし）
+    zIndex: 2,
+  },
   heroCard: {},
   card: {
     marginHorizontal: 16,

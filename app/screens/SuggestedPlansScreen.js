@@ -481,8 +481,11 @@ const SuggestedPlansScreen = ({ navigation }) => {
                 <View style={styles.stepRow}>
                   <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>2</Text></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.stepTitle}>生成されたプランを見て決定</Text>
-                    <Text style={styles.stepHint}>NEWの付いたプランから中身をチェックして選びましょう</Text>
+                    <Text style={styles.stepTitle}>生成されたプランを見て決定しよう</Text>
+                    <TouchableOpacity style={[styles.ctaButton, styles.decideButton]} activeOpacity={0.8} onPress={() => { /* no-op */ }}>
+                      <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                      <Text style={styles.ctaButtonText}>このプランに決定！</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
               </Animated.View>
@@ -638,18 +641,19 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   pageHeader: { paddingHorizontal: 16, paddingTop: 8 },
   pageTitle: { fontSize: 28, fontWeight: '900', color: '#222' },
-  heroWrap: { marginHorizontal: -16, paddingTop: 8, marginBottom: 12, overflow: 'hidden' },
-  heroGlass: { marginHorizontal: 16, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)', backgroundColor: 'rgba(255,255,255,0.85)', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  heroWrap: { marginHorizontal: -16, paddingTop: 4, marginBottom: 8, overflow: 'hidden' },
+  heroGlass: { marginHorizontal: 16, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)', backgroundColor: 'rgba(255,255,255,0.85)', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
   heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   heroChip: { backgroundColor: '#0EA5E9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
   heroChipText: { color: '#fff', fontSize: 10, fontWeight: '800' },
   heroSub: { color: '#555', fontSize: 13, marginTop: 2 },
-  heroKicker: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 6 },
+  heroKicker: { fontSize: 14, fontWeight: '700', color: '#333', marginBottom: 4 },
   introCard: { backgroundColor: '#FFFFFF', margin: 16, marginBottom: 8, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
   introTitle: { fontSize: 14, fontWeight: '800', color: '#333', marginBottom: 6 },
   introText: { fontSize: 13, color: '#555', lineHeight: 20, marginBottom: 10 },
-  ctaButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FF6347', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
-  ctaButtonText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  ctaButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FF6347', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  ctaButtonText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  decideButton: { marginTop: 4, backgroundColor: '#22C55E' },
   emptyText: { fontSize: 18, color: 'gray', textAlign: 'center' },
   emptySubText: { fontSize: 14, color: '#A0A0A0', marginTop: 8, textAlign: 'center' },
   listContainer: { padding: 16 },
@@ -737,10 +741,10 @@ const styles = StyleSheet.create({
   newPill: { marginLeft: 8, backgroundColor: '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, alignSelf: 'flex-start' },
   newPillText: { color: '#fff', fontSize: 10, fontWeight: '800' },
   // Steps UI
-  stepRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12, marginTop: 10 },
-  stepBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFE4DE', alignItems: 'center', justifyContent: 'center' },
-  stepBadgeText: { color: '#FF6347', fontWeight: '800' },
-  stepTitle: { fontSize: 14, fontWeight: '800', color: '#333', marginBottom: 8 },
+  stepRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10, marginTop: 8 },
+  stepBadge: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFE4DE', alignItems: 'center', justifyContent: 'center' },
+  stepBadgeText: { color: '#FF6347', fontWeight: '800', fontSize: 12 },
+  stepTitle: { fontSize: 13, fontWeight: '800', color: '#333', marginBottom: 6 },
   stepHint: { fontSize: 12, color: '#666' },
   stepDivider: { height: 1, backgroundColor: '#EEE', marginTop: 6 },
 });
