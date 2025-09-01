@@ -38,6 +38,43 @@ export default function ParagraphWithQA({
         const qaList = answersBySentence[s] || [];
         const isExpanded = !!expandedSentences[s];
         const latest = qaList[0];
+        // --- Helpers to aggregate descendant counts ---
+        const collectKeysFromAnswer = (ansText) => {
+          const keys = new Set();
+          try {
+            String(ansText || '')
+              .split(/\r?\n/)
+              .map((raw) => String(raw).trim())
+              .filter(Boolean)
+              .forEach((line) => {
+                const { key } = parseAnswerLine(line);
+                if (key) keys.add(key);
+              });
+          } catch (_) {}
+          return keys;
+        };
+        const countL2AndL3ForKey = (k2) => {
+          try {
+            const children = Array.isArray(childAnswersBySentence?.[k2]) ? childAnswersBySentence[k2] : [];
+            let total = children.length;
+            const gKeys = new Set();
+            children.forEach((cqa) => {
+              const ans2 = getAnswerText(cqa?.answer);
+              collectKeysFromAnswer(ans2).forEach((kk) => gKeys.add(kk));
+            });
+            gKeys.forEach((k3) => { total += (grandAnswersBySentence?.[k3]?.length || 0); });
+            return total;
+          } catch (_) { return 0; }
+        };
+        const totalCountL1 = (() => {
+          try {
+            let total = qaList.length; // depth1
+            const l2Keys = new Set();
+            qaList.forEach((qa) => collectKeysFromAnswer(getAnswerText(qa?.answer)).forEach((k) => l2Keys.add(k)));
+            l2Keys.forEach((k2) => { total += countL2AndL3ForKey(k2); });
+            return total;
+          } catch (_) { return qaList.length; }
+        })();
 
         return (
           <View key={idx} onLayout={(e) => onLayoutSentence && onLayoutSentence(s, e.nativeEvent.layout.y)}>
@@ -56,8 +93,8 @@ export default function ParagraphWithQA({
                 ]}
               >
                 {s}
-                {(qaList.length > 0) ? (
-                  <Text style={styles.countBadge}>{'  '}💬 {qaList.length}</Text>
+                {(totalCountL1 > 0) ? (
+                  <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
                 ) : null}
               </Text>
             </TouchableOpacity>
@@ -66,19 +103,19 @@ export default function ParagraphWithQA({
               <View style={styles.pinBlock}>
                 <TouchableOpacity
                   style={styles.pinHeader}
-                  onPress={qaList.length === 1 ? undefined : () => onToggleExpand(s)}
+                  onPress={totalCountL1 === 1 ? undefined : () => onToggleExpand(s)}
                   activeOpacity={0.8}
                   accessibilityRole="button"
-                  accessibilityLabel={qaList.length === 1 ? undefined : 'ピン留め回答をとじる'}
+                  accessibilityLabel={totalCountL1 === 1 ? undefined : 'ピン留め回答をとじる'}
                 >
                   <Text style={styles.pinIcon}>📌</Text>
                   <Text numberOfLines={1} style={styles.pinSummary}>
                     {latest?.question ? `質問: ${latest.question}` : '回答あり'}
                   </Text>
                   {/* 初回1件のみオープン時はカウント/とじるを表示しない */}
-                  {qaList.length > 1 ? (
+                  {totalCountL1 > 1 ? (
                     <>
-                      <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>💬 {qaList.length}</Text>
+                      <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>💬 {totalCountL1}</Text>
                       <Text style={styles.pinToggle}>とじる</Text>
                     </>
                   ) : null}
@@ -119,13 +156,13 @@ export default function ParagraphWithQA({
                                 style={{ flex: 1 }}
                               >
                                 {(() => { 
-                                  let cnt = 0; try { cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0; } catch {}
                                   const isOpen = !!expandedNestedSentences?.[key];
                                   const isSel = key === normalizeKey(selectedSentence);
                                   const sty = [styles.answerSentence, { paddingVertical: 4 }];
+                                  const sumL2L3 = countL2AndL3ForKey(key);
                                   if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
-                                  else if (cnt > 0) sty.push(styles.answeredUnderline);
-                                  const suffix = (cnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {cnt}</Text>) : null;
+                                  else if (sumL2L3 > 0) sty.push(styles.answeredUnderline);
+                                  const suffix = (sumL2L3 > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {sumL2L3}</Text>) : null;
                                   return (<InlineMD text={display} style={sty} suffix={suffix} />);
                                 })()}
                               </TouchableOpacity>
@@ -187,10 +224,6 @@ export default function ParagraphWithQA({
                                                     const suffix = (gcnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {gcnt}</Text>) : null;
                                                     return (<InlineMD text={as2} style={sty} suffix={suffix} />);
                                                   })()}
-                                                  {(() => { try {
-                                                    const gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0;
-                                                    return gcnt > 0 ? (<Text style={styles.countBadge}>💬 {gcnt}</Text>) : null;
-                                                  } catch(_) { return null; } })()}
                                                 </View>
                                               </TouchableOpacity>
                                             </View>
