@@ -58,27 +58,25 @@ export default function ParagraphWithQA({
               </View>
             </TouchableOpacity>
 
-            {qaList.length > 0 && (
+            {isExpanded && qaList.length > 0 && (
               <View style={styles.pinBlock}>
                 <TouchableOpacity
                   style={styles.pinHeader}
                   onPress={() => onToggleExpand(s)}
                   activeOpacity={0.8}
                   accessibilityRole="button"
-                  accessibilityLabel={isExpanded ? 'ピン留め回答をとじる' : 'ピン留め回答をひらく'}
+                  accessibilityLabel={'ピン留め回答をとじる'}
                 >
                   <Text style={styles.pinIcon}>📌</Text>
                   <Text numberOfLines={1} style={styles.pinSummary}>
                     {latest?.question ? `Q: ${latest.question}` : '回答あり'}
                   </Text>
-                  {/* 件数バッジ */}
-                  <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>
-                    💬 {qaList.length}
-                  </Text>
-                  <Text style={styles.pinToggle}>{isExpanded ? 'とじる' : 'ひらく'}</Text>
+                  {/* 件数バッジ（開いていても件数は保持） */}
+                  <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>💬 {qaList.length}</Text>
+                  <Text style={styles.pinToggle}>とじる</Text>
                 </TouchableOpacity>
 
-                {isExpanded && latest?.answer ? (
+                {latest?.answer ? (
                   <View style={{ marginTop: 8 }}>
                     {/* 文ごとのタップ（深掘り用） */}
                     {getAnswerText(latest?.answer).split(/\r?\n/)

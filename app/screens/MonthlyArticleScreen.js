@@ -527,6 +527,9 @@ export default function MonthlyArticleScreen() {
       }
       // 保持: スクロール位置は維持（送信時に移動させない）
       setQuestion('');
+      // 回答が到着したら選択ハイライトを解除（下線表示に切替）
+      try { setSelectedSentenceBoth(null); } catch (_) {}
+      try { setSelectedBaseSentence(null); } catch (_) {}
     } catch (e) {
       console.warn('[MonthlyArticle] askArticleQuestion catch', e);
       Alert.alert('エラー', e.message || '問い合わせに失敗しました');
