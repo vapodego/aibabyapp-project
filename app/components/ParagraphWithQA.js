@@ -91,62 +91,38 @@ export default function ParagraphWithQA({
                                 onPress={() => {
                                   const baseDepth = (latest && typeof latest.depth === 'number') ? latest.depth : 1;
                                   const asKey = key; // 正規化キー
-                                  try {
-                                    const childCount = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0;
-                                    const expanded = !!expandedNestedSentences?.[asKey];
-                                    onDebug?.({ tag: 'tap-answer', as: display, asKey, childCount, expanded, debugChildKeysCount: (debugChildKeys || []).length, debugExpandedKeysCount: (debugExpandedKeys || []).length });
-                                  } catch {}
-                                  onPressAnswerSentence?.(sent, baseDepth);
+                                  let cnt = 0;
+                                  try { cnt = Array.isArray(childAnswersBySentence?.[asKey]) ? childAnswersBySentence[asKey].length : 0; } catch {}
+                                  if (cnt > 0) {
+                                    onToggleNestedExpand?.(asKey);
+                                  } else {
+                                    onPressAnswerSentence?.(sent, baseDepth);
+                                  }
                                 }}
                                 style={{ flex: 1 }}
                               >
-                                <InlineMD
-                                  text={display}
-                                  style={[styles.answerSentence, { paddingVertical: 4 }, key === normalizeKey(selectedSentence) && (styles.selectedAnswer || styles.selectedSentence)]}
-                                />
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <InlineMD
+                                    text={display}
+                                    style={[
+                                      styles.answerSentence,
+                                      { paddingVertical: 4 },
+                                      (key === normalizeKey(selectedSentence) || (Array.isArray(childAnswersBySentence?.[key]) && childAnswersBySentence[key].length > 0)) && (styles.selectedAnswer || styles.selectedSentence)
+                                    ]}
+                                  />
+                                  {(() => { try {
+                                    const cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0;
+                                    return cnt > 0 ? (<Text style={styles.countBadge}>💬 {cnt}</Text>) : null;
+                                  } catch(_) { return null; } })()}
+                                </View>
                               </TouchableOpacity>
                             </View>
 
-                            {/* L2 折りたたみ表示（ひらく）: 子回答があるが閉じている場合にヒント行を表示 */}
-                            {(() => {
-                              try {
-                                const cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0;
-                                const open = !!expandedNestedSentences?.[key];
-                                if (cnt > 0 && !open) {
-                                  return (
-                                    <View style={[styles.nestedHeader, { paddingHorizontal: 8, paddingVertical: 4, marginLeft: hadBullet ? 22 : 16 }] }>
-                                      <Text style={styles.nestedIcon}>💬</Text>
-                                      <Text numberOfLines={1} style={styles.nestedSummary}>追回答 {cnt}件</Text>
-                                      <TouchableOpacity onPress={() => onToggleNestedExpand?.(key)}>
-                                        <Text style={styles.nestedToggle}>ひらく</Text>
-                                      </TouchableOpacity>
-                                    </View>
-                                  );
-                                }
-                              } catch(_) {}
-                              return null;
-                            })()}
+                            {/* 折りたたみヒント行は置かず、行末カウントとタップで開閉 */}
 
                             {/* L2（child）: 最新回答行の直下に子回答を表示（縦積み） */}
                             {expandedNestedSentences?.[key] ? (
                               <View style={[styles.nestedBlock, { marginLeft: (hadBullet ? 22 : 16) }]}> 
-                                {/* L2 ヘッダー（質問 + とじる/ひらく） */}
-                                {(() => {
-                                  const list = childAnswersBySentence?.[key] || [];
-                                  const first = list[0] || null;
-                                  const qtext = first && first.question ? String(first.question) : '';
-                                  return (
-                                    <View style={styles.nestedHeader}>
-                                      <Text style={styles.nestedIcon}>💬</Text>
-                                      <Text numberOfLines={1} style={styles.nestedSummary}>
-                                        {qtext ? `Q: ${qtext}` : '追回答'}
-                                      </Text>
-                                      <TouchableOpacity onPress={() => onToggleNestedExpand?.(key)}>
-                                        <Text style={styles.nestedToggle}>とじる</Text>
-                                      </TouchableOpacity>
-                                    </View>
-                                  );
-                                })()}
                                 <View style={styles.nestedBody}>
                                   {(childAnswersBySentence?.[key] || []).map((cqa, m) => (
                                     <View key={m} style={{ marginBottom: 4 }}>
@@ -167,15 +143,30 @@ export default function ParagraphWithQA({
                                                 accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(cqa && typeof cqa.depth === 'number') ? cqa.depth : 2}です`}
                                                 onPress={() => {
                                                   const baseDepth = (cqa && typeof cqa.depth === 'number') ? cqa.depth : 2;
-                                                  onPressAnswerSentence?.(as2, baseDepth);
-                                                  try {
-                                                    const isExpandedNow = !!expandedGrandNested?.[as2Key];
-                                                    if (!isExpandedNow) onToggleGrandNestedExpand?.(as2Key);
-                                                  } catch {}
+                                                  let gcnt = 0;
+                                                  try { gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0; } catch {}
+                                                  if (gcnt > 0) {
+                                                    onToggleGrandNestedExpand?.(as2Key);
+                                                  } else {
+                                                    onPressAnswerSentence?.(as2, baseDepth);
+                                                  }
                                                 }}
                                                 style={{ flex: 1 }}
                                               >
-                                                <InlineMD text={as2} style={[styles.answerSentence, { paddingVertical: 4 }, as2Key === normalizeKey(selectedSentence) && styles.selectedSentence]} />
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                  <InlineMD
+                                                    text={as2}
+                                                    style={[
+                                                      styles.answerSentence,
+                                                      { paddingVertical: 4 },
+                                                      (as2Key === normalizeKey(selectedSentence) || (Array.isArray(grandAnswersBySentence?.[as2Key]) && grandAnswersBySentence[as2Key].length > 0)) && (styles.selectedAnswer || styles.selectedSentence)
+                                                    ]}
+                                                  />
+                                                  {(() => { try {
+                                                    const gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0;
+                                                    return gcnt > 0 ? (<Text style={styles.countBadge}>💬 {gcnt}</Text>) : null;
+                                                  } catch(_) { return null; } })()}
+                                                </View>
                                               </TouchableOpacity>
                                             </View>
 
@@ -209,26 +200,7 @@ export default function ParagraphWithQA({
                                                   </View>
                                                 ))}
                                               </View>
-                                            ) : (
-                                              // L3 折りたたみ表示（ひらく）: 孫回答があるが閉じている場合
-                                              (() => {
-                                                try {
-                                                  const gcnt = Array.isArray(grandAnswersBySentence?.[as2Key]) ? grandAnswersBySentence[as2Key].length : 0;
-                                                  if (gcnt > 0) {
-                                                    return (
-                                                      <View style={[styles.nestedHeader, { paddingHorizontal: 8, paddingVertical: 4, marginLeft: hadBullet2 ? 22 : 16 }] }>
-                                                        <Text style={styles.nestedIcon}>↳</Text>
-                                                        <Text numberOfLines={1} style={styles.nestedSummary}>さらに {gcnt} 件</Text>
-                                                        <TouchableOpacity onPress={() => onToggleGrandNestedExpand?.(as2Key)}>
-                                                          <Text style={styles.nestedToggle}>ひらく</Text>
-                                                        </TouchableOpacity>
-                                                      </View>
-                                                    );
-                                                  }
-                                                } catch(_) {}
-                                                return null;
-                                              })()
-                                            )}
+                                            ) : null}
                                           </View>
                                         );
                                       })}

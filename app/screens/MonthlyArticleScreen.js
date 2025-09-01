@@ -525,13 +525,7 @@ export default function MonthlyArticleScreen() {
         // 親（ベース）も開いておく
         setExpandedSentences((prev) => ({ ...prev, [baseKey2]: true }));
       }
-      setTimeout(() => {
-        const y = sentencePositions[baseKey2];
-        console.log('[MonthlyArticle] scrollTo', { baseKey: baseKey2, y });
-        if (typeof y === 'number') {
-          try { scrollRef.current?.scrollTo({ y: Math.max(0, y - 120), animated: true }); } catch {}
-        }
-      }, 0);
+      // 保持: スクロール位置は維持（送信時に移動させない）
       setQuestion('');
     } catch (e) {
       console.warn('[MonthlyArticle] askArticleQuestion catch', e);
@@ -870,6 +864,8 @@ const styles = StyleSheet.create({
   qaItemNested: { marginTop: 6 },
   // 選択した回答行の下線
   selectedAnswer: { textDecorationLine: 'underline', textDecorationColor: '#6C54FF' },
+  // 行末のコメント数バッジ
+  countBadge: { fontSize: 12, color: '#6B7280', marginLeft: 8 },
 
   contextBar: {
     borderTopWidth: 1,
