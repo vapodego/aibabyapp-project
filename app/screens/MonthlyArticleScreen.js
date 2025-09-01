@@ -821,12 +821,15 @@ const styles = StyleSheet.create({
   selectedSentence: { backgroundColor: '#FFF5D6', borderRadius: 6, paddingHorizontal: 4 },
 
   pinBlock: {
-    marginLeft: 6,
+    marginLeft: 10,
     marginBottom: 8,
     backgroundColor: '#F8FAFF',
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E1E8FF',
+    borderLeftWidth: 2,
+    borderLeftColor: '#C7D2FE',
+    paddingLeft: 8,
   },
   pinHeader: {
     flexDirection: 'row',
@@ -851,6 +854,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E9E0FF',
+    borderLeftWidth: 2,
+    borderLeftColor: '#E0D9FF',
   },
   nestedHeader: {
     flexDirection: 'row',

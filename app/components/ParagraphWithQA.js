@@ -113,12 +113,30 @@ export default function ParagraphWithQA({
 
                             {/* L2（child）: 最新回答行の直下に子回答を表示（縦積み） */}
                             {expandedNestedSentences?.[key] ? (
-                              <View style={{ marginLeft: hadBullet ? 22 : 16, marginTop: 6 }}>
-                                {(childAnswersBySentence?.[key] || []).map((cqa, m) => (
-                                  <View key={m} style={{ marginBottom: 4 }}>
-                                    {String(cqa.answer).split(/\r?\n/)
-                                      .map((raw) => String(raw).trim())
-                                      .filter(Boolean)
+                              <View style={[styles.nestedBlock, { marginLeft: (hadBullet ? 22 : 16) }]}> 
+                                {/* L2 ヘッダー（質問 + とじる/ひらく） */}
+                                {(() => {
+                                  const list = childAnswersBySentence?.[key] || [];
+                                  const first = list[0] || null;
+                                  const qtext = first && first.question ? String(first.question) : '';
+                                  return (
+                                    <View style={styles.nestedHeader}>
+                                      <Text style={styles.nestedIcon}>💬</Text>
+                                      <Text numberOfLines={1} style={styles.nestedSummary}>
+                                        {qtext ? `Q: ${qtext}` : '追回答'}
+                                      </Text>
+                                      <TouchableOpacity onPress={() => onToggleNestedExpand?.(key)}>
+                                        <Text style={styles.nestedToggle}>とじる</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  );
+                                })()}
+                                <View style={styles.nestedBody}>
+                                  {(childAnswersBySentence?.[key] || []).map((cqa, m) => (
+                                    <View key={m} style={{ marginBottom: 4 }}>
+                                      {String(cqa.answer).split(/\r?\n/)
+                                        .map((raw) => String(raw).trim())
+                                        .filter(Boolean)
                                       .map((line2, n) => {
                                         const { display: as2, key: as2Key } = parseAnswerLine(line2);
                                         const hadBullet2 = as2 !== line2;
@@ -181,6 +199,7 @@ export default function ParagraphWithQA({
                                       })}
                                   </View>
                                 ))}
+                                </View>
                               </View>
                             ) : null}
                           </View>
