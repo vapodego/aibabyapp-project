@@ -41,10 +41,21 @@ export default function ParagraphWithQA({
 
         return (
           <View key={idx} onLayout={(e) => onLayoutSentence && onLayoutSentence(s, e.nativeEvent.layout.y)}>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => onPressSentence(s)}>
-              <Text style={[styles.paragraphSentence, s === selectedSentence && styles.selectedSentence]}>
-                {s}
-              </Text>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                const count = qaList.length;
+                if (count > 0) { onToggleExpand(s); } else { onPressSentence(s); }
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={[styles.paragraphSentence, s === selectedSentence && styles.selectedSentence]}>
+                  {s}
+                </Text>
+                {(!isExpanded && qaList.length > 0) ? (
+                  <Text style={styles.countBadge}>💬 {qaList.length}</Text>
+                ) : null}
+              </View>
             </TouchableOpacity>
 
             {qaList.length > 0 && (
