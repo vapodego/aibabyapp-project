@@ -139,6 +139,7 @@ export default function MonthlyArticleScreen() {
         const bySentence = {};
         const byChild = {};
         const byGrand = {};
+        const pendingFixes = [];
         snap.forEach(docSnap => {
           const d = docSnap.data();
           const qa = {
@@ -148,6 +149,16 @@ export default function MonthlyArticleScreen() {
             createdAt: d.createdAt || null,
             depth: d.depth || 1,
           };
+
+          // Backfill selection.normKey if missing (stabilize deep-dive linking)
+          try {
+            const sel = d?.selection;
+            if (sel && !sel.normKey) {
+              const disp = String(sel.display || sel.quote || '');
+              const nk = disp ? normalizeKey(disp) : '';
+              if (nk) pendingFixes.push(setDoc(docSnap.ref, { selection: { ...sel, normKey: nk } }, { merge: true }));
+            }
+          } catch (_) {}
 
           if (qa.depth === 1) {
             const a = d?.anchor || {};
@@ -184,18 +195,23 @@ export default function MonthlyArticleScreen() {
         Object.keys(bySentence).forEach(k => { exp[k] = true; });
         setExpandedSentences(prev => ({ ...prev, ...exp }));
 
- if (Object.keys(byChild).length) {
-   setExpandedNestedSentences(prev => ({
-     ...prev,
-     ...Object.fromEntries(Object.keys(byChild).map(k => [k, true])),
-   }));
- }
- if (Object.keys(byGrand).length) {
-   setExpandedGrandNested(prev => ({
-     ...prev,
-     ...Object.fromEntries(Object.keys(byGrand).map(k => [k, true])),
-   }));
- }
+        if (Object.keys(byChild).length) {
+          setExpandedNestedSentences(prev => ({
+            ...prev,
+            ...Object.fromEntries(Object.keys(byChild).map(k => [k, true])),
+          }));
+        }
+        if (Object.keys(byGrand).length) {
+          setExpandedGrandNested(prev => ({
+            ...prev,
+            ...Object.fromEntries(Object.keys(byGrand).map(k => [k, true])),
+          }));
+        }
+
+        // Fire-and-forget write-backs (best-effort)
+        if (pendingFixes.length) {
+          try { await Promise.allSettled(pendingFixes); } catch (_) {}
+        }
       } catch (e) {
         console.warn('[MonthlyArticle] load QAs failed:', e);
       }
