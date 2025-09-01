@@ -56,7 +56,7 @@ export default function ParagraphWithQA({
                 ]}
               >
                 {s}
-                {(!isExpanded && qaList.length > 0) ? (
+                {(qaList.length > 0) ? (
                   <Text style={styles.countBadge}>{'  '}💬 {qaList.length}</Text>
                 ) : null}
               </Text>
@@ -66,18 +66,22 @@ export default function ParagraphWithQA({
               <View style={styles.pinBlock}>
                 <TouchableOpacity
                   style={styles.pinHeader}
-                  onPress={() => onToggleExpand(s)}
+                  onPress={qaList.length === 1 ? undefined : () => onToggleExpand(s)}
                   activeOpacity={0.8}
                   accessibilityRole="button"
-                  accessibilityLabel={'ピン留め回答をとじる'}
+                  accessibilityLabel={qaList.length === 1 ? undefined : 'ピン留め回答をとじる'}
                 >
                   <Text style={styles.pinIcon}>📌</Text>
                   <Text numberOfLines={1} style={styles.pinSummary}>
                     {latest?.question ? `Q: ${latest.question}` : '回答あり'}
                   </Text>
-                  {/* 件数バッジ（開いていても件数は保持） */}
-                  <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>💬 {qaList.length}</Text>
-                  <Text style={styles.pinToggle}>とじる</Text>
+                  {/* 初回1件のみオープン時はカウント/とじるを表示しない */}
+                  {qaList.length > 1 ? (
+                    <>
+                      <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>💬 {qaList.length}</Text>
+                      <Text style={styles.pinToggle}>とじる</Text>
+                    </>
+                  ) : null}
                 </TouchableOpacity>
 
                 {latest?.answer ? (
@@ -121,7 +125,7 @@ export default function ParagraphWithQA({
                                   const sty = [styles.answerSentence, { paddingVertical: 4 }];
                                   if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
                                   else if (cnt > 0) sty.push(styles.answeredUnderline);
-                                  const suffix = (!isOpen && cnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {cnt}</Text>) : null;
+                                  const suffix = (cnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {cnt}</Text>) : null;
                                   return (<InlineMD text={display} style={sty} suffix={suffix} />);
                                 })()}
                               </TouchableOpacity>
@@ -180,7 +184,7 @@ export default function ParagraphWithQA({
                                                     const sty = [styles.answerSentence, { paddingVertical: 4 }];
                                                     if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
                                                     else if (gcnt > 0) sty.push(styles.answeredUnderline);
-                                                    const suffix = (!gOpen && gcnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {gcnt}</Text>) : null;
+                                                    const suffix = (gcnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {gcnt}</Text>) : null;
                                                     return (<InlineMD text={as2} style={sty} suffix={suffix} />);
                                                   })()}
                                                   {(() => { try {
