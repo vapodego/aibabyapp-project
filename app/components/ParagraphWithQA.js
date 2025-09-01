@@ -48,14 +48,18 @@ export default function ParagraphWithQA({
                 if (count > 0) { onToggleExpand(s); } else { onPressSentence(s); }
               }}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={[styles.paragraphSentence, s === selectedSentence && styles.selectedSentence]}>
-                  {s}
-                </Text>
+              <Text
+                style={[
+                  styles.paragraphSentence,
+                  s === selectedSentence && styles.selectedSentence,
+                  (!isExpanded && qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
+                ]}
+              >
+                {s}
                 {(!isExpanded && qaList.length > 0) ? (
-                  <Text style={styles.countBadge}>💬 {qaList.length}</Text>
+                  <Text style={styles.countBadge}>{'  '}💬 {qaList.length}</Text>
                 ) : null}
-              </View>
+              </Text>
             </TouchableOpacity>
 
             {isExpanded && qaList.length > 0 && (
@@ -110,21 +114,16 @@ export default function ParagraphWithQA({
                                 }}
                                 style={{ flex: 1 }}
                               >
-                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  {(() => { 
-                                    let cnt = 0; try { cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0; } catch {}
-                                    const isOpen = !!expandedNestedSentences?.[key];
-                                    const isSel = key === normalizeKey(selectedSentence);
-                                    const sty = [styles.answerSentence, { paddingVertical: 4 }];
-                                    if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
-                                    else if (cnt > 0 && !isOpen) sty.push(styles.answeredUnderline);
-                                    return (<InlineMD text={display} style={sty} />);
-                                  })()}
-                                  {(() => { try {
-                                    const cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0;
-                                    return cnt > 0 ? (<Text style={styles.countBadge}>💬 {cnt}</Text>) : null;
-                                  } catch(_) { return null; } })()}
-                                </View>
+                                {(() => { 
+                                  let cnt = 0; try { cnt = Array.isArray(childAnswersBySentence?.[key]) ? childAnswersBySentence[key].length : 0; } catch {}
+                                  const isOpen = !!expandedNestedSentences?.[key];
+                                  const isSel = key === normalizeKey(selectedSentence);
+                                  const sty = [styles.answerSentence, { paddingVertical: 4 }];
+                                  if (isSel) sty.push(styles.selectedAnswer || styles.selectedSentence);
+                                  else if (cnt > 0 && !isOpen) sty.push(styles.answeredUnderline);
+                                  const suffix = (!isOpen && cnt > 0) ? (<Text style={styles.countBadge}>{'  '}💬 {cnt}</Text>) : null;
+                                  return (<InlineMD text={display} style={sty} suffix={suffix} />);
+                                })()}
                               </TouchableOpacity>
                             </View>
 

@@ -13,7 +13,7 @@ const DevBadge = ({ count = 0, expanded = false }) => {
 };
 
 // --- Minimal inline Markdown renderer (bold, italic, bullets, simple links) ---
-export function InlineMD({ text, style }) {
+export function InlineMD({ text, style, suffix = null }) {
   // Split into inline tokens for **bold**, *italic*, and `code`
   const parts = [];
   let rest = String(text);
@@ -50,6 +50,7 @@ export function InlineMD({ text, style }) {
         if (p.type === 'link') return <Text key={i} style={[style, { textDecorationLine: 'underline' }]}>{p.label}</Text>;
         return <Text key={i} style={style}>{p.value}</Text>;
       })}
+      {suffix}
     </Text>
   );
 }
