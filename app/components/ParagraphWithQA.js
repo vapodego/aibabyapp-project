@@ -73,7 +73,7 @@ export default function ParagraphWithQA({
                 >
                   <Text style={styles.pinIcon}>📌</Text>
                   <Text numberOfLines={1} style={styles.pinSummary}>
-                    {latest?.question ? `Q: ${latest.question}` : '回答あり'}
+                    {latest?.question ? `質問: ${latest.question}` : '回答あり'}
                   </Text>
                   {/* 初回1件のみオープン時はカウント/とじるを表示しない */}
                   {qaList.length > 1 ? (
@@ -143,7 +143,7 @@ export default function ParagraphWithQA({
                                   return qtext ? (
                                     <View style={styles.nestedHeader}>
                                       <Text style={styles.nestedIcon}>💬</Text>
-                                      <Text numberOfLines={1} style={styles.nestedSummary}>Q: {qtext}</Text>
+                                      <Text numberOfLines={1} style={styles.nestedSummary}>質問: {qtext}</Text>
                                     </View>
                                   ) : null; } catch (_) { return null; } })()}
                                 <View style={styles.nestedBody}>

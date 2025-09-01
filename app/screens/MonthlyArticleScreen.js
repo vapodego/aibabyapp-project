@@ -100,13 +100,7 @@ export default function MonthlyArticleScreen() {
 
   // --- In-app lightweight debug overlay (for test builds without console output) ---
   const [debugLog, setDebugLog] = useState(null);
-  const pushDebug = (obj) => {
-    try {
-      const s = typeof obj === 'string' ? obj : JSON.stringify(obj);
-      setDebugLog(`[MonthlyArticle] ${s}`);
-      setTimeout(() => setDebugLog(null), 8000);
-    } catch (_) {}
-  };
+  const pushDebug = (_) => { /* no-op in app UI */ };
 
   const MAX_DEPTH = 3; // 深掘りは最大3段
 
@@ -838,7 +832,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   pinIcon: { fontSize: 12, marginRight: 6 },
-  pinSummary: { flex: 1, fontSize: 12, color: '#334' },
+  pinSummary: { flex: 1, fontSize: 14, color: '#334', fontWeight: '700' },
   pinToggle: { fontSize: 12, color: '#3B6EF5', marginLeft: 8 },
   pinBody: { paddingHorizontal: 10, paddingBottom: 8 },
   qaItem: { marginTop: 6 },
@@ -864,7 +858,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   nestedIcon: { fontSize: 12, marginRight: 6 },
-  nestedSummary: { flex: 1, fontSize: 12, color: '#334' },
+  nestedSummary: { flex: 1, fontSize: 14, color: '#334', fontWeight: '700' },
   nestedToggle: { fontSize: 12, color: '#6C54FF', marginLeft: 8 },
   nestedBody: { paddingHorizontal: 10, paddingBottom: 8 },
   qaItemNested: { marginTop: 6 },
