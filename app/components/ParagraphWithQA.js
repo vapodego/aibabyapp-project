@@ -128,6 +128,82 @@ export default function ParagraphWithQA({
                                 ]}
                               />
                             </TouchableOpacity>
+
+                            {/* L2（child）: 最新回答行の直下に子回答を表示 */}
+                            {expandedNestedSentences?.[key] ? (
+                              <View style={{ marginLeft: hadBullet ? 22 : 16, marginTop: 6 }}>
+                                {(childAnswersBySentence?.[key] || []).map((cqa, m) => (
+                                  <View key={m} style={{ marginBottom: 4 }}>
+                                    {String(cqa.answer).split(/\r?\n/)
+                                      .map((raw) => String(raw).trim())
+                                      .filter(Boolean)
+                                      .map((line2, n) => {
+                                        const { display: as2, key: as2Key } = parseAnswerLine(line2);
+                                        const hadBullet2 = as2 !== line2;
+                                        return (
+                                          <View key={n} style={{ flexDirection: 'column' }}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                                              {hadBullet2 ? <Text style={[styles.answerSentence, { paddingVertical: 4, marginRight: 6 }]}>•</Text> : null}
+                                              <TouchableOpacity
+                                                activeOpacity={0.7}
+                                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(cqa && typeof cqa.depth === 'number') ? cqa.depth : 2}です`}
+                                                onPress={() => {
+                                                  const baseDepth = (cqa && typeof cqa.depth === 'number') ? cqa.depth : 2;
+                                                  onPressAnswerSentence?.(as2, baseDepth);
+                                                  try {
+                                                    const isExpandedNow = !!expandedGrandNested?.[as2Key];
+                                                    if (!isExpandedNow) onToggleGrandNestedExpand?.(as2Key);
+                                                  } catch {}
+                                                }}
+                                                style={{ flex: 1 }}
+                                              >
+                                                <InlineMD
+                                                  text={as2}
+                                                  style={[styles.answerSentence, { paddingVertical: 4 }, as2Key === normalizeKey(selectedSentence) && styles.selectedSentence]}
+                                                />
+                                              </TouchableOpacity>
+                                            </View>
+
+                                            {/* L3（grand）: 孫回答 */}
+                                            {expandedGrandNested?.[as2Key] ? (
+                                              <View style={{ marginLeft: hadBullet2 ? 22 : 16, marginTop: 4 }}>
+                                                {(grandAnswersBySentence?.[as2Key] || []).map((gqa, t) => (
+                                                  <View key={t} style={{ marginBottom: 4 }}>
+                                                    {String(gqa.answer).split(/\r?\n/)
+                                                      .map((raw) => String(raw).trim())
+                                                      .filter(Boolean)
+                                                      .map((line3, u) => {
+                                                        const { display: as3, key: as3Key } = parseAnswerLine(line3);
+                                                        const hadBullet3 = as3 !== line3;
+                                                        return (
+                                                          <View key={u} style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                                                            {hadBullet3 ? <Text style={[styles.answerSentence, { paddingVertical: 4, marginRight: 6 }]}>•</Text> : null}
+                                                            <TouchableOpacity
+                                                              activeOpacity={0.7}
+                                                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                                              accessibilityRole="button"
+                                                              accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(gqa && typeof gqa.depth === 'number') ? gqa.depth : 3}です`}
+                                                              onPress={() => onPressAnswerSentence?.(as3, gqa?.depth)}
+                                                              style={{ flex: 1 }}
+                                                            >
+                                                              <InlineMD text={as3} style={[styles.answerSentence, { paddingVertical: 4 }, as3Key === normalizeKey(selectedSentence) && styles.selectedSentence]} />
+                                                            </TouchableOpacity>
+                                                          </View>
+                                                        );
+                                                      })}
+                                                  </View>
+                                                ))}
+                                              </View>
+                                            ) : null}
+                                          </View>
+                                        );
+                                      })}
+                                  </View>
+                                ))}
+                              </View>
+                            ) : null}
                           </View>
                         );
                       })}
