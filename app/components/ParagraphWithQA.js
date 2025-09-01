@@ -105,7 +105,7 @@ export default function ParagraphWithQA({
                                   if (cnt > 0) {
                                     onToggleNestedExpand?.(asKey);
                                   } else {
-                                    onPressAnswerSentence?.(sent, baseDepth);
+                                    onPressAnswerSentence?.(sent, baseDepth, s);
                                   }
                                 }}
                                 style={{ flex: 1 }}
@@ -168,7 +168,7 @@ export default function ParagraphWithQA({
                                                   if (gcnt > 0) {
                                                     onToggleGrandNestedExpand?.(as2Key);
                                                   } else {
-                                                    onPressAnswerSentence?.(as2, baseDepth);
+                                                    onPressAnswerSentence?.(as2, baseDepth, s);
                                                   }
                                                 }}
                                                 style={{ flex: 1 }}
@@ -209,9 +209,9 @@ export default function ParagraphWithQA({
                                                               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                                               accessibilityRole="button"
                                                               accessibilityLabel={`回答文をタップして深掘り。現在の深さは${(gqa && typeof gqa.depth === 'number') ? gqa.depth : 3}です`}
-                                                              onPress={() => onPressAnswerSentence?.(as3, gqa?.depth)}
-                                                              style={{ flex: 1 }}
-                                                            >
+                                                            onPress={() => onPressAnswerSentence?.(as3, gqa?.depth, s)}
+                                                            style={{ flex: 1 }}
+                                                          >
                                                               <InlineMD text={as3} style={[styles.answerSentence, { paddingVertical: 4 }, as3Key === normalizeKey(selectedSentence) && styles.selectedSentence]} />
                                                             </TouchableOpacity>
                                                           </View>
@@ -237,7 +237,7 @@ export default function ParagraphWithQA({
                     <NestedQA
                       qaList={qaList}
                       selectedSentence={selectedSentence}
-                      onPressAnswerSentence={onPressAnswerSentence}
+                      onPressAnswerSentence={(ans, depth) => onPressAnswerSentence?.(ans, depth, s)}
                       childAnswersBySentence={childAnswersBySentence}
                       expandedNestedSentences={expandedNestedSentences}
                       toggleNestedExpand={onToggleNestedExpand}

@@ -371,13 +371,16 @@ export default function MonthlyArticleScreen() {
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const handleAnswerSentenceDeepDive = (s, baseDepth) => {
-    // ベース未設定なら先に本文の文をタップしてもらう
-    if (!selectedBaseSentence) {
+  const handleAnswerSentenceDeepDive = (s, baseDepth, baseSentenceMaybe) => {
+    // ベース未設定の場合でも、呼び出し元から baseSentence が来ていれば採用
+    if (!selectedBaseSentence && baseSentenceMaybe) {
+      try { setSelectedBaseSentence(baseSentenceMaybe); } catch(_) {}
+    }
+    if (!selectedBaseSentence && !baseSentenceMaybe) {
       Alert.alert('文の選択', 'まず本文の気になる一文をタップしてから、回答内で深掘りしてください。');
       return;
     }
-    const baseKey = selectedBaseSentence;
+    const baseKey = selectedBaseSentence || baseSentenceMaybe;
     const cur = typeof baseDepth === 'number' ? baseDepth : getCurrentDepthForSentence(baseKey);
     if (cur >= MAX_DEPTH) {
       Alert.alert('深掘りの上限', `この文での深掘りは最大${MAX_DEPTH}段までです。`);
@@ -868,7 +871,7 @@ const styles = StyleSheet.create({
   // 選択した回答行のハイライト（本文と統一の黄色）
   selectedAnswer: { backgroundColor: '#FFF5D6', borderRadius: 6, paddingHorizontal: 4 },
   // 行末のコメント数バッジ
-  countBadge: { fontSize: 12, color: '#6B7280', marginLeft: 8 },
+  countBadge: { fontSize: 12, color: '#4F46E5', marginLeft: 8, backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, fontWeight: '700', flexShrink: 0 },
   // 回答があるが閉じている行の下線（視認用）
   answeredUnderline: { textDecorationLine: 'underline', textDecorationColor: '#6C54FF' },
 
