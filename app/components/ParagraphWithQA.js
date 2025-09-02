@@ -256,6 +256,20 @@ export default function ParagraphWithQA({
                                       })}
                                   </View>
                                 ))}
+                                {/* L2 末尾のアクション行（チャットへ誘導） */}
+                                <View style={{ marginTop: 8, alignItems: 'flex-start' }}>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      const initialText = `この記事の次の文について、さらに相談したいです。\n\n「${s}」`;
+                                      navigation.navigate('HomeTab', { initialText });
+                                    }}
+                                    accessibilityRole="button"
+                                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                    activeOpacity={0.8}
+                                  >
+                                    <Text style={[styles.nestedToggle, { fontWeight: '700' }]}>さらに深掘りする →</Text>
+                                  </TouchableOpacity>
+                                </View>
                                 </View>
                               </View>
                             ) : null}
