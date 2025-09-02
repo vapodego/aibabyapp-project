@@ -353,7 +353,6 @@ export default function ArticleHubScreen() {
       } catch (_) {}
       await fetchRecommended();
       await fetchFirstPage();
-      Alert.alert('受付しました', `記事の作成を開始しました。${articleId ? `ID: ${articleId}` : ''}`.trim());
     } catch (e) {
       console.warn('[ArticleHub] requestArticleCreation failed:', e);
       const msg = (e && e.message) || (e && e.code) || '関数の呼び出しに失敗しました';
