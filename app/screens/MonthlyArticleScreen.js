@@ -164,8 +164,14 @@ export default function MonthlyArticleScreen() {
             let baseText = null;
             if (h && sentenceMaps.hashToText.has(h)) {
               baseText = sentenceMaps.hashToText.get(h).text;
-            } else if (d?.selection?.quote && sentenceMaps.textToHash.has(d.selection.quote)) {
-              baseText = d.selection.quote;
+            } else if (d?.selection?.quote) {
+              if (sentenceMaps.textToHash.has(d.selection.quote)) {
+                baseText = d.selection.quote;
+              } else {
+                const nk = normalizeKey(String(d.selection.quote));
+                const hit = nk ? sentenceMaps.normToText?.get(nk) : null;
+                if (hit && hit.text) baseText = hit.text;
+              }
             }
             if (!baseText) return; // anchorできない一次回答はスキップ
             qa.selectedSentence = baseText;
@@ -327,15 +333,18 @@ export default function MonthlyArticleScreen() {
   const sentenceMaps = useMemo(() => {
     const textToHash = new Map();
     const hashToText = new Map();
+    const normToText = new Map();
     paragraphs.forEach((p, pi) => {
       const ss = splitToSentences(p);
       ss.forEach((s, si) => {
         const h = stableIdFor(s);
         textToHash.set(s, { hash: h, pi, si });
         if (!hashToText.has(h)) hashToText.set(h, { text: s, pi, si });
+        const nk = normalizeKey(s);
+        if (nk && !normToText.has(nk)) normToText.set(nk, { text: s, pi, si });
       });
     });
-    return { textToHash, hashToText };
+    return { textToHash, hashToText, normToText };
   }, [paragraphs]);
 
   // タイトル（記事に title があればそれを使用。無ければ祝うトーンのデフォルト）
