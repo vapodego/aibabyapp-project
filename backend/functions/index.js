@@ -180,7 +180,7 @@ async function generateArticleWithGemini({ topic, monthAge, tags }) {
       '制約:',
       '- 事実ベースで安全第一。医療判断はしない。',
       '- 箇条書き記号やMarkdownは使わず、プレーンテキストの段落で。',
-      '- 絵文字は自然な文脈で使っても使わなくてもよい。目安は記事全体で0〜3個程度（不要なら0でOK）。種類は中立的なものに限定（例: 🌟💡🍀🍼⚠️🏥💤🙂🍚🛌）。',
+      // 絵文字の使用に関する制約は設けない（モデルの裁量に委ねる）,
       '- 日本の保護者向けの語調。断定は避け丁寧に。',
       '',
       `トピック: ${topic}`,
@@ -205,36 +205,12 @@ async function generateArticleWithGemini({ topic, monthAge, tags }) {
     // Try to parse JSON object in the response
     const start = s.indexOf('{');
     const end = s.lastIndexOf('}');
-    // --- Emoji soft sanitizer (no placement rules): keep to a small global cap and whitelist ---
-    const sanitizeEmojis = (str) => {
-      try {
-        const allowed = ['🌟','💡','🍀','🍼','⚠️','🏥','💤','🙂','🍚','🛌'];
-        const MAX = 3;
-        let out = String(str || '');
-        // Remove most pictographs outside our allowlist (broad ranges)
-        out = out.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}]/gu, (m) => (allowed.includes(m) ? m : ''));
-        // Enforce global cap across allowed set (scan left-to-right)
-        let count = 0;
-        for (const emo of allowed) {
-          out = out.replace(new RegExp(emo.replace(/([.*+?^${}()|[\]\\])/g, '\\$1'), 'g'), (m) => {
-            if (count < MAX) { count++; return m; }
-            return '';
-          });
-        }
-        // Collapse accidental repeats (e.g., "🌟🌟" -> "🌟")
-        out = out.replace(/(🌟|💡|🍀|🍼|⚠️|🏥|💤|🙂|🍚|🛌){2,}/g, '$1');
-        return out;
-      } catch (_) { return String(str || ''); }
-    };
-
     if (start >= 0 && end > start) {
       try {
         const obj = JSON.parse(s.slice(start, end + 1));
-        const title = sanitizeEmojis(String(obj.title || '').trim());
-        const rawSections = Array.isArray(obj.sections) ? obj.sections.map(v => String(v || '').replace(/\r/g,'').trim()).filter(Boolean) : [];
-        const sections = rawSections.map(sct => sanitizeEmojis(sct));
-        const body = (sections.length ? sections.join('\n\n') : String(obj.body || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim());
-        const bodySan = sanitizeEmojis(body);
+        const title = String(obj.title || '').trim();
+        const sections = Array.isArray(obj.sections) ? obj.sections.map(v => String(v || '').replace(/\r/g,'').trim()).filter(Boolean) : [];
+        const body = sections.length ? sections.join('\n\n') : String(obj.body || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
         const tagsOut = Array.isArray(obj.tags) ? obj.tags.map(t => String(t).trim()).filter(Boolean).slice(3,8).slice(0,5) : (Array.isArray(obj.tags) ? obj.tags.map(t => String(t).trim()).filter(Boolean).slice(0,5) : []);
         const sourcesOut = Array.isArray(obj.sources)
           ? obj.sources.map(x => ({
@@ -243,13 +219,13 @@ async function generateArticleWithGemini({ topic, monthAge, tags }) {
               note: String(x?.note || '').trim(),
             })).filter(x => x.title || x.url)
           : [];
-        if (title && bodySan) return { title, body: bodySan, sections, tags: tagsOut, sources: sourcesOut };
+        if (title && body) return { title, body, sections, tags: tagsOut, sources: sourcesOut };
       } catch (_) { /* fallthrough */ }
     }
     // Heuristic fallback: first line as title
     const lines = s.split(/\n+/).map(t => t.trim()).filter(Boolean);
-    const title = sanitizeEmojis((lines[0] || topic).slice(0, 40));
-    const body = sanitizeEmojis(lines.slice(1).join('\n').trim() || `${topic}\n\nこの記事は安全性を重視して概要をまとめています。気になる場合は小児科等にご相談ください。`);
+    const title = (lines[0] || topic).slice(0, 40);
+    const body = lines.slice(1).join('\n').trim() || `${topic}\n\nこの記事は安全性を重視して概要をまとめています。気になる場合は小児科等にご相談ください。`;
     return { title, body, sections: [], tags: [], sources: [] };
   } catch (e) {
     console.error('[generateArticleWithGemini] generation failed:', e?.message || e);
