@@ -116,7 +116,22 @@ async function buildPromptFromArticle(article) {
   const title = article?.title || '育児記事のヒーロー画像';
   const tags = Array.isArray(article?.tags) ? article.tags.join(', ') : '';
   const body = sanitizePromptForSafety(stripMarkdown(String(article?.body || '')).slice(0, 800));
-  const monthAge = ''; // 月齢は安全側のためプロンプトから除外
+
+  if (!STRICT_IMAGE_SAFETY) {
+    return `
+あなたはやさしいタッチのイラストレーターです。以下の育児記事に合う温かいヒーロー画像を作ります。
+- スタイル: イラスト/フラット/やわらかい色調（非写実）。
+- 人物（赤ちゃん/保護者）もOK。ただしロゴやテキストは入れない。
+- 横長16:9、見出しに干渉しない余白。
+
+# 記事メタ
+- タイトル: ${title}
+- タグ: ${tags}
+
+# 記事の要点（抜粋）
+${body}
+`;
+  }
 
   return `
 あなたは優秀なビジュアルアーティストです。以下の育児記事の内容に基づき、
@@ -200,10 +215,12 @@ async function generateImageBytes(prompt, { language = 'en', aspectRatio = '16:9
     enhancePrompt: true, // 002 では強化を有効にして関連性を上げる（必要に応じて後で AB）
     includeRaiReason: true,
     includeSafetyAttributes: true,
-    personGeneration: 'dont_allow', // 乳幼児・顔検出まわりのブロックを避ける
     outputOptions: { mimeType: 'image/jpeg', compressionQuality: 82 },
     // seed は addWatermark=true の場合は無効。
   };
+  if (STRICT_IMAGE_SAFETY) {
+    parameters.personGeneration = 'dont_allow';
+  }
 
   const body = {
     instances: [{ prompt }],
@@ -257,18 +274,28 @@ async function ensureArticleHeroImage(articleId, article) {
     bytes = await generateImageBytes(jaPrompt, { language: 'ja' });
   } catch (e1) {
     try {
-      // Fallback 2: Object-only prompt (English) with strictly safe motifs
-      const enPrompt = buildObjectOnlyPrompt(article);
-      console.info('[imagegen] fallback to object-only prompt');
-      bytes = await generateImageBytes(enPrompt, { language: 'en' });
+      // Fallback 2: policy-dependent
+      if (STRICT_IMAGE_SAFETY) {
+        const enPrompt = buildObjectOnlyPrompt(article);
+        console.info('[imagegen] fallback to object-only prompt');
+        bytes = await generateImageBytes(enPrompt, { language: 'en' });
+      } else {
+        const enPrompt = `Friendly illustrated banner with baby and caregiver in a simple, abstract style (non-photorealistic). No logos or text. 16:9.`;
+        console.info('[imagegen] fallback to illustrated-people prompt');
+        bytes = await generateImageBytes(enPrompt, { language: 'en' });
+      }
     } catch (e2) {
       // Fallback 3: Minimal neutral composition
-      const minimal = [
-        'Flat minimalist vector hero image. ONLY safe icons: spoon, small bowl, stars, shield icon.',
-        'No people. No silhouettes. No faces or hands. No skin tones.',
-        'Soft pastel colors. 16:9 layout.',
-      ].join('\n');
-      console.info('[imagegen] fallback to minimal neutral prompt');
+      const minimal = STRICT_IMAGE_SAFETY
+        ? [
+            'Flat minimalist vector hero image. ONLY safe icons: spoon, small bowl, stars, shield icon.',
+            'No people. No silhouettes. No faces or hands. No skin tones.',
+            'Soft pastel colors. 16:9 layout.',
+          ].join('\n')
+        : [
+            'Friendly non-photorealistic illustration banner related to parenting. No logos or text. Pastel colors. 16:9.',
+          ].join('\n');
+      console.info('[imagegen] fallback to minimal prompt');
       bytes = await generateImageBytes(minimal, { language: 'en' });
     }
   }
