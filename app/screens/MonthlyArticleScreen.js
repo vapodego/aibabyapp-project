@@ -17,7 +17,7 @@ import {
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, collection, query, orderBy, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import NestedQA from '../components/NestedQA';
 import { splitToSentences } from '../components/NestedQA';
@@ -124,8 +124,12 @@ export default function MonthlyArticleScreen() {
     const run = async () => {
       try {
         if (!articleId) return;
-        const uid = auth.currentUser?.uid;
-        if (!uid) return; // not signed in; skip
+        let uid = auth.currentUser?.uid;
+        // Ensure we have a user (anonymous OK) so we can read user's QA
+        if (!uid) {
+          try { await signInAnonymously(auth); uid = auth.currentUser?.uid; } catch (_) {}
+        }
+        if (!uid) return; // still not signed in; skip for now
         const colRef = collection(db, `users/${uid}/articles/${articleId}/qa`);
         const q = query(colRef, orderBy('createdAt', 'asc'));
         const snap = await getDocs(q);
