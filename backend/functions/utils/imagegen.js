@@ -118,17 +118,38 @@ async function buildPromptFromArticle(article) {
   const body = sanitizePromptForSafety(stripMarkdown(String(article?.body || '')).slice(0, 800));
 
   if (!STRICT_IMAGE_SAFETY) {
+    // Story cues derived from article content
+    const { setting, timeOfDay, actionHint } = (function deriveStoryHints(a) {
+      try {
+        const text = `${a?.title || ''} ${Array.isArray(a?.tags) ? a.tags.join(' ') : ''} ${String(a?.body || '')}`;
+        const t = text.toLowerCase();
+        let setting = 'a cozy home interior';
+        let timeOfDay = 'daytime soft light';
+        let actionHint = 'a gentle caregiving moment';
+        if (/(睡眠|寝|眠|就寝|夜|ねんね)/.test(text)) { setting = 'a calm bedroom'; timeOfDay = 'evening warm light'; actionHint = 'soothing to sleep'; }
+        else if (/(離乳|食|栄養|食事|ミルク)/.test(text)) { setting = 'a kitchen or dining table'; timeOfDay = 'daytime natural light'; actionHint = 'feeding time'; }
+        else if (/(外気浴|散歩|外出|公園|ベビーカー)/.test(text)) { setting = 'a small park or balcony'; timeOfDay = 'morning light breeze'; actionHint = 'going for a short walk'; }
+        else if (/(発達|遊び|運動|知育|おもちゃ)/.test(text)) { setting = 'a living room play area with a soft mat'; timeOfDay = 'daytime soft light'; actionHint = 'playing with simple toys'; }
+        else if (/(安全|予防|事故|ケガ|怪我|対策)/.test(text)) { setting = 'a tidy living room with childproofed furniture'; timeOfDay = 'daytime'; actionHint = 'carefully checking the environment'; }
+        else if (/(小児科|受診|病院|診察|検診|医療)/.test(text)) { setting = 'a pediatric clinic waiting area'; timeOfDay = 'daytime'; actionHint = 'waiting calmly with a toy'; }
+        return { setting, timeOfDay, actionHint };
+      } catch (_) { return { setting: 'a cozy home interior', timeOfDay: 'daytime soft light', actionHint: 'a gentle caregiving moment' }; }
+    })(article);
+    const motifs = pickSafeMotifsFromArticle(article);
     return `
-あなたはやさしいタッチのイラストレーターです。以下の育児記事に合う温かいヒーロー画像を作ります。
-- スタイル: イラスト/フラット/やわらかい色調（非写実）。
-- 人物（赤ちゃん/保護者）もOK。ただしロゴやテキストは入れない。
-- 横長16:9、見出しに干渉しない余白。
+You are an illustrator. Create a warm, non-photorealistic hero illustration that suggests a little story related to the parenting article.
+- Style: illustration / flat / soft pastel colors (non‑photorealistic).
+- People allowed (baby + caregiver) but stylized only. No real person likeness. No logos or text.
+- Narrative: show a micro‑scene that implies a story — ${actionHint}, in ${setting}, ${timeOfDay}. Focus on one clear moment with gentle motion and reassuring tone.
+- Composition: clear focal point; relevant props in foreground; generous whitespace so a title could sit above.
+- Layout: 16:9 wide banner suitable for an article cover.
 
-# 記事メタ
-- タイトル: ${title}
-- タグ: ${tags}
+# Article meta
+- Title: ${title}
+- Tags: ${tags}
+- Theme objects (suggestions): ${motifs.join(', ')}
 
-# 記事の要点（抜粋）
+# Excerpt
 ${body}
 `;
   }
@@ -293,7 +314,7 @@ async function ensureArticleHeroImage(articleId, article) {
             'Soft pastel colors. 16:9 layout.',
           ].join('\n')
         : [
-            'Friendly non-photorealistic illustration banner related to parenting. No logos or text. Pastel colors. 16:9.',
+            'Friendly non-photorealistic illustration banner that suggests a small story related to parenting (micro-scene). No logos or text. Pastel colors. 16:9.',
           ].join('\n');
       console.info('[imagegen] fallback to minimal prompt');
       bytes = await generateImageBytes(minimal, { language: 'en' });
