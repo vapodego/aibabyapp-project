@@ -384,8 +384,8 @@ export default function MonthlyArticleScreen() {
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const handleSend = async () => {
-    const trimmed = question.trim();
+  const handleSend = async (overrideText) => {
+    const trimmed = (overrideText != null ? String(overrideText) : question).trim();
     const currentSelected = selectedSentenceRef.current;
     console.log('[MonthlyArticle] handleSend start', { selectedSentence: currentSelected, trimmed });
     if (!trimmed) return;
@@ -534,6 +534,19 @@ export default function MonthlyArticleScreen() {
       setIsAsking(false);
       console.log('[MonthlyArticle] handleSend finally');
     }
+  };
+
+  // ワンタップ深掘り（入力不要）
+  const handleQuickAsk = async () => {
+    try {
+      const baseKey = selectedBaseSentence || selectedSentenceRef.current || null;
+      if (!baseKey) {
+        Alert.alert('文を選択', 'まず本文の気になる一文をタップしてください。');
+        return;
+      }
+      const autoQ = 'この内容をさらに具体化して、実践手順・注意点・受診の目安を簡潔に教えて。';
+      await handleSend(autoQ);
+    } catch (e) {}
   };
 
 
@@ -711,6 +724,9 @@ export default function MonthlyArticleScreen() {
 
       {/* 下部質問入力バー */}
       <View style={styles.inputBar}>
+        <TouchableOpacity style={[styles.quickBtn, isAsking && { opacity: 0.6 }]} onPress={isAsking ? undefined : handleQuickAsk} disabled={isAsking} accessibilityRole="button" accessibilityLabel="選択中の文をもとに、入力なしで深掘り質問する">
+          <Text style={styles.quickBtnText}>AI</Text>
+        </TouchableOpacity>
         <TextInput
           ref={inputRef}
           style={styles.input}
@@ -891,6 +907,15 @@ const styles = StyleSheet.create({
     borderTopColor: '#eee',
     backgroundColor: '#fff',
   },
+  quickBtn: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#6C63FF',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginRight: 8,
+  },
+  quickBtnText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   input: {
     flex: 1,
     minHeight: 40,
