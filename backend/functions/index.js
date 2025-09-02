@@ -253,12 +253,12 @@ exports.requestArticleCreation = onCall({ region: 'asia-northeast1', timeoutSeco
       title: gen.title,
       body: gen.body,
       tags: Array.isArray(gen.tags) ? gen.tags : [],
-      sections: Array.isArray(gen.sections) && gen.sections.length ? gen.sections : undefined,
-      sources: Array.isArray(gen.sources) && gen.sources.length ? gen.sources : undefined,
       version: 1,
       locale: 'ja-JP',
       status: 'published',
     };
+    if (Array.isArray(gen.sections) && gen.sections.length) art.sections = gen.sections;
+    if (Array.isArray(gen.sources) && gen.sources.length) art.sources = gen.sources;
 
     const ref = db.collection('articles').doc();
     console.log('[requestArticleCreation] about to save article', { titleBytes: art.title.length, bodyBytes: art.body.length, tagsCount: art.tags.length });
@@ -322,12 +322,12 @@ exports.requestArticleCreationHttp = https.onRequest({ timeoutSeconds: 540, memo
       title: gen.title,
       body: gen.body,
       tags: Array.isArray(gen.tags) ? gen.tags : [],
-      sections: Array.isArray(gen.sections) && gen.sections.length ? gen.sections : undefined,
-      sources: Array.isArray(gen.sources) && gen.sources.length ? gen.sources : undefined,
       version: 1,
       locale: 'ja-JP',
       status: 'published',
     };
+    if (Array.isArray(gen.sections) && gen.sections.length) art.sections = gen.sections;
+    if (Array.isArray(gen.sources) && gen.sources.length) art.sources = gen.sources;
 
     const ref = db.collection('articles').doc();
     console.log('[requestArticleCreationHttp] about to save article', { titleBytes: art.title.length, bodyBytes: art.body.length, tagsCount: art.tags.length });
