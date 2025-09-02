@@ -29,6 +29,7 @@ export default function ParagraphWithQA({
   onDebug,
   debugChildKeys = [],
   debugExpandedKeys = [],
+  navigation = null,
 }) {
   const pieces = useMemo(() => splitToSentences(text), [text]);
 
@@ -261,7 +262,7 @@ export default function ParagraphWithQA({
                                   <TouchableOpacity
                                     onPress={() => {
                                       const initialText = `この記事の次の文について、さらに相談したいです。\n\n「${s}」`;
-                                      navigation.navigate('HomeTab', { initialText });
+                                      try { navigation && navigation.navigate && navigation.navigate('HomeTab', { initialText }); } catch (_) {}
                                     }}
                                     accessibilityRole="button"
                                     hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}

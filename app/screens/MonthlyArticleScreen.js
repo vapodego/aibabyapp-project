@@ -613,6 +613,7 @@ export default function MonthlyArticleScreen() {
             debugChildKeys={Object.keys(childAnswersBySentence)}
             debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
             styles={styles}
+            navigation={navigation}
           />
         </Section>
 
@@ -636,6 +637,7 @@ export default function MonthlyArticleScreen() {
             debugChildKeys={Object.keys(childAnswersBySentence)}
             debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
             styles={styles}
+            navigation={navigation}
           />
         </Section>
 
@@ -659,6 +661,7 @@ export default function MonthlyArticleScreen() {
             debugChildKeys={Object.keys(childAnswersBySentence)}
             debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
             styles={styles}
+            navigation={navigation}
           />
         </Section>
 
@@ -682,6 +685,7 @@ export default function MonthlyArticleScreen() {
             debugChildKeys={Object.keys(childAnswersBySentence)}
             debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
             styles={styles}
+            navigation={navigation}
           />
         </Section>
 
@@ -818,7 +822,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     marginBottom: 8,
     backgroundColor: '#F8FAFF',
-    borderRadius: 8,
+    borderRadius: 0,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E1E8FF',
     borderLeftWidth: 2,
@@ -845,7 +849,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 6,
     backgroundColor: '#FDFBFF',
-    borderRadius: 8,
+    borderRadius: 0,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E9E0FF',
     borderLeftWidth: 2,
