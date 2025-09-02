@@ -103,22 +103,14 @@ export default function ParagraphWithQA({
               <View style={styles.pinBlock}>
                 <TouchableOpacity
                   style={styles.pinHeader}
-                  onPress={totalCountL1 === 1 ? undefined : () => onToggleExpand(s)}
+                  onPress={undefined}
                   activeOpacity={0.8}
                   accessibilityRole="button"
-                  accessibilityLabel={totalCountL1 === 1 ? undefined : 'ピン留め回答をとじる'}
                 >
                   <Text style={styles.pinIcon}>📌</Text>
-                  <Text numberOfLines={1} style={styles.pinSummary}>
+                  <Text numberOfLines={2} style={styles.pinSummary}>
                     {latest?.question ? `質問: ${latest.question}` : '回答あり'}
                   </Text>
-                  {/* 初回1件のみオープン時はカウント/とじるを表示しない */}
-                  {totalCountL1 > 1 ? (
-                    <>
-                      <Text style={styles.pinCount || { marginLeft: 8, fontSize: 12, color: '#6B7280' }}>💬 {totalCountL1}</Text>
-                      <Text style={styles.pinToggle}>とじる</Text>
-                    </>
-                  ) : null}
                 </TouchableOpacity>
 
                 {latest?.answer ? (
@@ -180,7 +172,7 @@ export default function ParagraphWithQA({
                                   return qtext ? (
                                     <View style={styles.nestedHeader}>
                                       <Text style={styles.nestedIcon}>💬</Text>
-                                      <Text numberOfLines={1} style={styles.nestedSummary}>質問: {qtext}</Text>
+                                      <Text numberOfLines={2} style={styles.nestedSummary}>質問: {qtext}</Text>
                                     </View>
                                   ) : null; } catch (_) { return null; } })()}
                                 <View style={styles.nestedBody}>
