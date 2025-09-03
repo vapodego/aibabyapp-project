@@ -137,11 +137,12 @@ async function buildPromptFromArticle(article) {
     })(article);
     const motifs = pickSafeMotifsFromArticle(article);
     return `
-You are an illustrator. Create a warm, non-photorealistic hero illustration that suggests a little story related to the parenting article.
-- Style: illustration / flat / soft pastel colors (non‑photorealistic).
-- People allowed (baby + caregiver) but stylized only. No real person likeness. No logos or text.
-- Narrative: show a micro‑scene that implies a story — ${actionHint}, in ${setting}, ${timeOfDay}. Focus on one clear moment with gentle motion and reassuring tone.
-- Composition: clear focal point; relevant props in foreground; generous whitespace so a title could sit above.
+You are an illustrator. Create a warm, **non‑photorealistic** hero illustration that suggests a **small story** related to the parenting article.
+
+- Style: storybook illustration, soft watercolor texture, subtle paper grain, hand‑drawn feel; flat shapes with gentle gradients; **no photorealism**.
+- People: allowed (baby + caregiver) but **stylized/simplified** only; anonymized faces (simple dots/lines), no real person likeness, no logos or text.
+- Narrative: capture a **micro‑scene** that implies warmth, care, and everyday parenting life — ${actionHint}, in ${setting}, ${timeOfDay}. Suggest **gentle motion** (e.g., swaying mobile, drifting curtain) without depicting action blur.
+- Composition: clear focal point; use **layered depth** (foreground / midground / background) to draw the viewer in; generous whitespace so a title could sit above.
 - Layout: 16:9 wide banner suitable for an article cover.
 
 # Article meta
@@ -289,6 +290,7 @@ async function saveToGcs(buffer, destPath, { cacheSeconds = 300 } = {}) {
  * @returns {{url: string, alt: string, source: string}}
  */
 async function ensureArticleHeroImage(articleId, article) {
+  console.info('[imagegen] STRICT_IMAGE_SAFETY =', STRICT_IMAGE_SAFETY);
   const jaPrompt = await buildPromptFromArticle(article);
   let bytes;
   try {
@@ -301,7 +303,7 @@ async function ensureArticleHeroImage(articleId, article) {
         console.info('[imagegen] fallback to object-only prompt');
         bytes = await generateImageBytes(enPrompt, { language: 'en' });
       } else {
-        const enPrompt = `Friendly illustrated banner with baby and caregiver in a simple, abstract style (non-photorealistic). No logos or text. 16:9.`;
+        const enPrompt = `Storybook watercolor‑style illustration banner (non‑photorealistic) with a stylized baby and caregiver; simplified/anonymized faces; layered depth; gentle motion cues; no logos or text; 16:9.`;
         console.info('[imagegen] fallback to illustrated-people prompt');
         bytes = await generateImageBytes(enPrompt, { language: 'en' });
       }

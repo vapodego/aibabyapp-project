@@ -46,14 +46,6 @@ function stableIdFor(s) { return hashDjb2(normalizeForHash(s)); }
  * - 本文を「文」単位でタップ可能にし、選んだ文を文脈として下部の質問バーに差し込む
  * - 質問を送信すると Chat 画面へ遷移（route: 'Chat'）し、initialText にコンテキスト付き質問を渡す
  */
-// Paragraph templates used in this screen (keep in sync with JSX)
-function buildParagraphs(displayMonth) {
-  const p1 = `今月は${displayMonth}か月の節目。首や体幹の安定、声や表情のやり取りが一段と豊かになります。個人差は大きいので「できる/できない」で焦らなくて大丈夫です。`;
-  const p2 = `睡眠や授乳のリズムは少しずつ整っていきますが、夜の覚醒が続くこともあります。環境の明暗や生活音の整え方、抱っこの姿勢、ミルク/母乳の回数など、あなたの家庭で無理なく続けられる工夫を探していきましょう。`;
-  const p3 = `目を合わせてゆっくり話しかける、歌を添える、短時間の外気浴を取り入れるなど、簡単で続けやすい関わりが効果的です。季節に応じた保湿や暑さ寒さへの配慮も忘れずに。`;
-  const p4 = `ここまで来たのは立派な成果です。できていない所ではなく、できている所に目を向けてください。頼れる所に頼ることは、家族の健康を守る選択です。`;
-  return [p1, p2, p3, p4];
-}
 
 export default function MonthlyArticleScreen() {
   const route = useRoute();
@@ -322,13 +314,9 @@ export default function MonthlyArticleScreen() {
   }
 
   const paragraphs = useMemo(() => {
-    if (Array.isArray(article?.sections) && article.sections.length > 0) {
-      return normalizeSections(article.sections, 4);
-    }
-    if (article?.body && String(article.body).trim()) {
-      return splitIntoSections(article.body, 4);
-    }
-    return buildParagraphs(displayMonth);
+    // Use AI-generated body as-is (free form). Fallback to monthly template only if no body exists.
+    const b = (article?.body && String(article.body).trim()) ? String(article.body) : buildMonthlyBody(displayMonth);
+    return [b];
   }, [article, displayMonth]);
   const sentenceMaps = useMemo(() => {
     const textToHash = new Map();
@@ -617,83 +605,11 @@ export default function MonthlyArticleScreen() {
         {/* タイトル＆サブタイトル */}
         <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
           <Text style={styles.headerTitle}>{title}</Text>
-          <Text style={styles.headerSubtitle}>生後{displayMonth}か月になりました。今月の見どころと、気になる点をその場で質問できます。</Text>
+          <Text style={styles.headerSubtitle}>生後{displayMonth}か月向けのAI記事です。本文中の気になる一文をタップして、その場で深掘り質問できます。</Text>
         </View>
-        <Section title="発達の目安">
+        <Section title="記事本文">
           <ParagraphWithQA
             text={paragraphs[0]}
-            onPressSentence={handleSentencePress}
-            selectedSentence={selectedSentence}
-            answersBySentence={answersBySentence}
-            expandedSentences={expandedSentences}
-            onToggleExpand={toggleSentenceExpand}
-            onPressAnswerSentence={handleAnswerSentenceDeepDive}
-            onLayoutSentence={registerSentenceLayout}
-            childAnswersBySentence={childAnswersBySentence}
-            expandedNestedSentences={expandedNestedSentences}
-            onToggleNestedExpand={toggleNestedExpand}
-            grandAnswersBySentence={grandAnswersBySentence}
-            expandedGrandNested={expandedGrandNested}
-            onToggleGrandNestedExpand={toggleGrandNestedExpand}
-            onDebug={pushDebug}
-            debugChildKeys={Object.keys(childAnswersBySentence)}
-            debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
-            styles={styles}
-            navigation={navigation}
-          />
-        </Section>
-
-        <Section title="親が気にすべきこと">
-          <ParagraphWithQA
-            text={paragraphs[1]}
-            onPressSentence={handleSentencePress}
-            selectedSentence={selectedSentence}
-            answersBySentence={answersBySentence}
-            expandedSentences={expandedSentences}
-            onToggleExpand={toggleSentenceExpand}
-            onPressAnswerSentence={handleAnswerSentenceDeepDive}
-            onLayoutSentence={registerSentenceLayout}
-            childAnswersBySentence={childAnswersBySentence}
-            expandedNestedSentences={expandedNestedSentences}
-            onToggleNestedExpand={toggleNestedExpand}
-            grandAnswersBySentence={grandAnswersBySentence}
-            expandedGrandNested={expandedGrandNested}
-            onToggleGrandNestedExpand={toggleGrandNestedExpand}
-            onDebug={pushDebug}
-            debugChildKeys={Object.keys(childAnswersBySentence)}
-            debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
-            styles={styles}
-            navigation={navigation}
-          />
-        </Section>
-
-        <Section title="実践ヒント">
-          <ParagraphWithQA
-            text={paragraphs[2]}
-            onPressSentence={handleSentencePress}
-            selectedSentence={selectedSentence}
-            answersBySentence={answersBySentence}
-            expandedSentences={expandedSentences}
-            onToggleExpand={toggleSentenceExpand}
-            onPressAnswerSentence={handleAnswerSentenceDeepDive}
-            onLayoutSentence={registerSentenceLayout}
-            childAnswersBySentence={childAnswersBySentence}
-            expandedNestedSentences={expandedNestedSentences}
-            onToggleNestedExpand={toggleNestedExpand}
-            grandAnswersBySentence={grandAnswersBySentence}
-            expandedGrandNested={expandedGrandNested}
-            onToggleGrandNestedExpand={toggleGrandNestedExpand}
-            onDebug={pushDebug}
-            debugChildKeys={Object.keys(childAnswersBySentence)}
-            debugExpandedKeys={Object.keys(expandedNestedSentences).filter(k => !!expandedNestedSentences[k])}
-            styles={styles}
-            navigation={navigation}
-          />
-        </Section>
-
-        <Section title="親へのメッセージ">
-          <ParagraphWithQA
-            text={paragraphs[3]}
             onPressSentence={handleSentencePress}
             selectedSentence={selectedSentence}
             answersBySentence={answersBySentence}

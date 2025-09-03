@@ -193,8 +193,9 @@ async function generateArticleWithGemini({ topic, monthAge, tags }) {
       try {
         const obj = JSON.parse(s.slice(start, end + 1));
         const title = String(obj.title || '').trim();
-        const sections = Array.isArray(obj.sections) ? obj.sections.map(v => String(v || '').replace(/\r/g,'').trim()).filter(Boolean) : [];
-        const body = sections.length ? sections.join('\n\n') : String(obj.body || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        // Flatten sections into one body; ignore sections field entirely
+        const parsedSections = Array.isArray(obj.sections) ? obj.sections.map(v => String(v || '').replace(/\r/g,'').trim()).filter(Boolean) : [];
+        const body = parsedSections.length ? parsedSections.join('\n\n') : String(obj.body || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
         const tagsOut = Array.isArray(obj.tags) ? obj.tags.map(t => String(t).trim()).filter(Boolean).slice(3,8).slice(0,5) : (Array.isArray(obj.tags) ? obj.tags.map(t => String(t).trim()).filter(Boolean).slice(0,5) : []);
         const sourcesOut = Array.isArray(obj.sources)
           ? obj.sources.map(x => ({
@@ -203,14 +204,14 @@ async function generateArticleWithGemini({ topic, monthAge, tags }) {
               note: String(x?.note || '').trim(),
             })).filter(x => x.title || x.url)
           : [];
-        if (title && body) return { title, body, sections, tags: tagsOut, sources: sourcesOut };
+        if (title && body) return { title, body, tags: tagsOut, sources: sourcesOut };
       } catch (_) { /* fallthrough */ }
     }
     // Heuristic fallback: first line as title
     const lines = s.split(/\n+/).map(t => t.trim()).filter(Boolean);
     const title = (lines[0] || topic).slice(0, 40);
     const body = lines.slice(1).join('\n').trim() || `${topic}\n\nこの記事は安全性を重視して概要をまとめています。気になる場合は小児科等にご相談ください。`;
-    return { title, body, sections: [], tags: [], sources: [] };
+    return { title, body, tags: [], sources: [] };
   } catch (e) {
     console.error('[generateArticleWithGemini] generation failed:', e?.message || e);
     throw new Error('article generation failed (Gemini)');
@@ -257,7 +258,6 @@ exports.requestArticleCreation = onCall({ region: 'asia-northeast1', timeoutSeco
       locale: 'ja-JP',
       status: 'published',
     };
-    if (Array.isArray(gen.sections) && gen.sections.length) art.sections = gen.sections;
     if (Array.isArray(gen.sources) && gen.sources.length) art.sources = gen.sources;
 
     const ref = db.collection('articles').doc();
@@ -326,7 +326,6 @@ exports.requestArticleCreationHttp = https.onRequest({ timeoutSeconds: 540, memo
       locale: 'ja-JP',
       status: 'published',
     };
-    if (Array.isArray(gen.sections) && gen.sections.length) art.sections = gen.sections;
     if (Array.isArray(gen.sources) && gen.sources.length) art.sources = gen.sources;
 
     const ref = db.collection('articles').doc();
