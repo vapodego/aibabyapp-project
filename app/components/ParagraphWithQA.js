@@ -86,23 +86,49 @@ export default function ParagraphWithQA({
                 if (count > 0) { onToggleExpand(s); } else { onPressSentence(s); }
               }}
             >
-              <Text
-                style={{ flexShrink: 1 }}
-                accessible accessibilityRole="button"
-                accessibilityLabel={qaList.length > 0 ? '質問あり。タップで開閉' : 'この文に質問する'}
-              >
-                <InlineMD
-                  text={s}
-                  style={[
-                    styles.paragraphSentence,
-                    s === selectedSentence && styles.selectedSentence,
-                    (qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
-                  ]}
-                />
-                {(totalCountL1 > 0) ? (
-                  <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
-                ) : null}
-              </Text>
+              {(() => {
+                // Simple line-classification: heading (##), bullet (* or -), normal
+                const mHead = s.match(/^\s*(#{1,3})\s+(.+)/);
+                const mBullet = s.match(/^\s*[*-]\s+(.+)/);
+                const baseStyle = [
+                  styles.paragraphSentence,
+                  s === selectedSentence && styles.selectedSentence,
+                  (qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
+                ];
+                if (mHead) {
+                  const level = mHead[1].length;
+                  const text = mHead[2];
+                  const headStyle = [{ fontWeight: '800', color: '#333' }];
+                  if (level === 1) headStyle.push({ fontSize: 17 });
+                  if (level === 2) headStyle.push({ fontSize: 16 });
+                  if (level >= 3) headStyle.push({ fontSize: 15 });
+                  return (
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
+                      <InlineMD text={text} style={[...baseStyle, ...headStyle]} />
+                    </View>
+                  );
+                }
+                if (mBullet) {
+                  const text = mBullet[1];
+                  return (
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
+                      <Text style={[...baseStyle, { marginRight: 6 }]}>•</Text>
+                      <InlineMD text={text} style={baseStyle} />
+                      {(totalCountL1 > 0) ? (
+                        <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
+                      ) : null}
+                    </View>
+                  );
+                }
+                return (
+                  <Text style={{ flexShrink: 1 }} accessible accessibilityRole="button" accessibilityLabel={qaList.length > 0 ? '質問あり。タップで開閉' : 'この文に質問する'}>
+                    <InlineMD text={s} style={baseStyle} />
+                    {(totalCountL1 > 0) ? (
+                      <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
+                    ) : null}
+                  </Text>
+                );
+              })()}
             </TouchableOpacity>
 
             {isExpanded && qaList.length > 0 && (
