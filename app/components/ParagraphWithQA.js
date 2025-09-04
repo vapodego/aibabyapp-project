@@ -99,7 +99,7 @@ export default function ParagraphWithQA({
                 ];
                 return (
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
-                    <View style={{ flex: 1, minWidth: 0 }}>{renderMD(s, baseStyle)}</View>
+                    <View style={{ flex: 1, minWidth: 0 }} pointerEvents="none">{renderMD(s, baseStyle)}</View>
                     {(totalCountL1 > 0) ? (
                       <Text style={styles.countBadge}>  💬 {totalCountL1}</Text>
                     ) : null}
