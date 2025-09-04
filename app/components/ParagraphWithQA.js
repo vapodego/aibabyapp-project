@@ -1,6 +1,7 @@
 // app/components/ParagraphWithQA.js
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import NestedQA, { splitToSentences, InlineMD } from './NestedQA';
 import { normalizeKey, parseAnswerLine } from '../utils/keying';
 
@@ -32,21 +33,9 @@ export default function ParagraphWithQA({
   navigation = null,
 }) {
   const pieces = useMemo(() => splitToSentences(text), [text]);
-  // Optional: use react-native-markdown-display if installed (dynamic to avoid Metro resolution errors)
-  let MarkdownDisplay = null;
-  try {
-    // use eval to avoid static analysis by Metro when the module is not installed
-    // eslint-disable-next-line no-eval
-    const rq = eval('require');
-    if (typeof rq === 'function') {
-      const mod = rq('react-native-markdown-display');
-      MarkdownDisplay = (mod && (mod.default || mod)) || null;
-    }
-  } catch (_) { MarkdownDisplay = null; }
-  const renderMD = (mdText, styleObj) => {
-    if (MarkdownDisplay) return <MarkdownDisplay style={{ body: styleObj }}>{mdText}</MarkdownDisplay>;
-    return <InlineMD text={mdText} style={styleObj} />;
-  };
+  const renderMD = (mdText, styleObj) => (
+    <Markdown style={{ body: styleObj }}>{mdText}</Markdown>
+  );
 
   return (
     <View>
@@ -110,9 +99,7 @@ export default function ParagraphWithQA({
                 ];
                 return (
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      {renderMD(s, baseStyle)}
-                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>{renderMD(s, baseStyle)}</View>
                     {(totalCountL1 > 0) ? (
                       <Text style={styles.countBadge}>  💬 {totalCountL1}</Text>
                     ) : null}
