@@ -32,6 +32,21 @@ export default function ParagraphWithQA({
   navigation = null,
 }) {
   const pieces = useMemo(() => splitToSentences(text), [text]);
+  // Optional: use react-native-markdown-display if installed (dynamic to avoid Metro resolution errors)
+  let MarkdownDisplay = null;
+  try {
+    // use eval to avoid static analysis by Metro when the module is not installed
+    // eslint-disable-next-line no-eval
+    const rq = eval('require');
+    if (typeof rq === 'function') {
+      const mod = rq('react-native-markdown-display');
+      MarkdownDisplay = (mod && (mod.default || mod)) || null;
+    }
+  } catch (_) { MarkdownDisplay = null; }
+  const renderMD = (mdText, styleObj) => {
+    if (MarkdownDisplay) return <MarkdownDisplay style={{ body: styleObj }}>{mdText}</MarkdownDisplay>;
+    return <InlineMD text={mdText} style={styleObj} />;
+  };
 
   return (
     <View>
@@ -87,46 +102,21 @@ export default function ParagraphWithQA({
               }}
             >
               {(() => {
-                // Simple line-classification: heading (##), bullet (* or -), normal
-                const mHead = s.match(/^\s*(#{1,3})\s+(.+)/);
-                const mBullet = s.match(/^\s*[*-]\s+(.+)/);
+                // Prefer using Markdown renderer if available; still keep count badge to the right
                 const baseStyle = [
                   styles.paragraphSentence,
                   s === selectedSentence && styles.selectedSentence,
                   (qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
                 ];
-                if (mHead) {
-                  const level = mHead[1].length;
-                  const text = mHead[2];
-                  const headStyle = [{ fontWeight: '800', color: '#333' }];
-                  if (level === 1) headStyle.push({ fontSize: 17 });
-                  if (level === 2) headStyle.push({ fontSize: 16 });
-                  if (level >= 3) headStyle.push({ fontSize: 15 });
-                  return (
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
-                      <InlineMD text={text} style={[...baseStyle, ...headStyle]} />
-                    </View>
-                  );
-                }
-                if (mBullet) {
-                  const text = mBullet[1];
-                  return (
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
-                      <Text style={[...baseStyle, { marginRight: 6 }]}>•</Text>
-                      <InlineMD text={text} style={baseStyle} />
-                      {(totalCountL1 > 0) ? (
-                        <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
-                      ) : null}
-                    </View>
-                  );
-                }
                 return (
-                  <Text style={{ flexShrink: 1 }} accessible accessibilityRole="button" accessibilityLabel={qaList.length > 0 ? '質問あり。タップで開閉' : 'この文に質問する'}>
-                    <InlineMD text={s} style={baseStyle} />
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', flexShrink: 1 }}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      {renderMD(s, baseStyle)}
+                    </View>
                     {(totalCountL1 > 0) ? (
-                      <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
+                      <Text style={styles.countBadge}>  💬 {totalCountL1}</Text>
                     ) : null}
-                  </Text>
+                  </View>
                 );
               })()}
             </TouchableOpacity>
