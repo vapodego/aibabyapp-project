@@ -87,13 +87,18 @@ export default function ParagraphWithQA({
               }}
             >
               <Text
-                style={[
-                  styles.paragraphSentence,
-                  s === selectedSentence && styles.selectedSentence,
-                  (qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
-                ]}
+                style={{ flexShrink: 1 }}
+                accessible accessibilityRole="button"
+                accessibilityLabel={qaList.length > 0 ? '質問あり。タップで開閉' : 'この文に質問する'}
               >
-                {s}
+                <InlineMD
+                  text={s}
+                  style={[
+                    styles.paragraphSentence,
+                    s === selectedSentence && styles.selectedSentence,
+                    (qaList.length > 0 && s !== selectedSentence) && styles.answeredUnderline,
+                  ]}
+                />
                 {(totalCountL1 > 0) ? (
                   <Text style={styles.countBadge}>{'  '}💬 {totalCountL1}</Text>
                 ) : null}
@@ -169,7 +174,12 @@ export default function ParagraphWithQA({
                                 {(() => { try {
                                   const list = childAnswersBySentence?.[key] || [];
                                   const first = list[0] || null;
-                                  const qtext = first && first.question ? String(first.question) : '';
+                                  const rawQ = first && first.question;
+                                  const qtext = (typeof rawQ === 'string')
+                                    ? rawQ
+                                    : (rawQ && typeof rawQ === 'object' && typeof rawQ.text === 'string')
+                                      ? rawQ.text
+                                      : '';
                                   return qtext ? (
                                     <View style={styles.nestedHeader}>
                                       <Text style={styles.nestedIcon}>💬</Text>
@@ -224,6 +234,17 @@ export default function ParagraphWithQA({
                                             {/* L3（grand）: 孫回答 */}
                                             {expandedGrandNested?.[as2Key] ? (
                                               <View style={{ marginLeft: hadBullet2 ? 22 : 16, marginTop: 4 }}>
+                                                {(() => { try {
+                                                  const glist = grandAnswersBySentence?.[as2Key] || [];
+                                                  const gfirst = glist[0] || null;
+                                                  const raw = gfirst && gfirst.question;
+                                                  const gq = (typeof raw === 'string') ? raw : (raw && typeof raw === 'object' && typeof raw.text === 'string') ? raw.text : '';
+                                                  return gq ? (
+                                                    <View style={styles.nestedHeader}>
+                                                      <Text style={styles.nestedIcon}>💬</Text>
+                                                      <Text numberOfLines={2} style={styles.nestedSummary}>質問: {gq}</Text>
+                                                    </View>
+                                                  ) : null; } catch (_) { return null; } })()}
                                                 {(grandAnswersBySentence?.[as2Key] || []).map((gqa, t) => (
                                                   <View key={t} style={{ marginBottom: 4 }}>
                                                     {String(gqa.answer).split(/\r?\n/)
