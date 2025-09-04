@@ -33,6 +33,52 @@ export default function ParagraphWithQA({
   navigation = null,
 }) {
   const pieces = useMemo(() => splitToSentences(text), [text]);
+  // Precompute child and grand totals per key for performance
+  const { childLenMap, grandTotalMap } = useMemo(() => {
+    const cMap = new Map();
+    const gMap = new Map();
+    try {
+      const obj = childAnswersBySentence || {};
+      Object.keys(obj).forEach((k2) => {
+        const arr = Array.isArray(obj[k2]) ? obj[k2] : [];
+        cMap.set(k2, arr.length);
+        const k3set = new Set();
+        arr.forEach((cqa) => {
+          const ans2 = getAnswerText(cqa?.answer);
+          String(ans2 || '')
+            .split(/\r?\n/)
+            .map((raw) => String(raw).trim())
+            .filter(Boolean)
+            .forEach((line) => { const { key } = parseAnswerLine(line); if (key) k3set.add(key); });
+        });
+        let gsum = 0;
+        k3set.forEach((k3) => { gsum += (grandAnswersBySentence?.[k3]?.length || 0); });
+        gMap.set(k2, gsum);
+      });
+    } catch (_) {}
+    return { childLenMap: cMap, grandTotalMap: gMap };
+  }, [childAnswersBySentence, grandAnswersBySentence]);
+  // Map L1 sentence -> set of L2 keys parsed from its QA answers
+  const l2KeysBySentence = useMemo(() => {
+    const m = new Map();
+    try {
+      const obj = answersBySentence || {};
+      Object.keys(obj).forEach((sent) => {
+        const list = Array.isArray(obj[sent]) ? obj[sent] : [];
+        const set = new Set();
+        list.forEach((qa) => {
+          const ans = getAnswerText(qa?.answer);
+          String(ans || '')
+            .split(/\r?\n/)
+            .map((raw) => String(raw).trim())
+            .filter(Boolean)
+            .forEach((line) => { const { key } = parseAnswerLine(line); if (key) set.add(key); });
+        });
+        m.set(sent, set);
+      });
+    } catch (_) {}
+    return m;
+  }, [answersBySentence]);
   const renderMD = (mdText, styleObj) => (
     <Markdown style={{ body: styleObj }}>{mdText}</Markdown>
   );
@@ -44,42 +90,19 @@ export default function ParagraphWithQA({
         const isExpanded = !!expandedSentences[s];
         const latest = qaList[0];
         // --- Helpers to aggregate descendant counts ---
-        const collectKeysFromAnswer = (ansText) => {
-          const keys = new Set();
-          try {
-            String(ansText || '')
-              .split(/\r?\n/)
-              .map((raw) => String(raw).trim())
-              .filter(Boolean)
-              .forEach((line) => {
-                const { key } = parseAnswerLine(line);
-                if (key) keys.add(key);
-              });
-          } catch (_) {}
-          return keys;
-        };
         const countL2AndL3ForKey = (k2) => {
-          try {
-            const children = Array.isArray(childAnswersBySentence?.[k2]) ? childAnswersBySentence[k2] : [];
-            let total = children.length;
-            const gKeys = new Set();
-            children.forEach((cqa) => {
-              const ans2 = getAnswerText(cqa?.answer);
-              collectKeysFromAnswer(ans2).forEach((kk) => gKeys.add(kk));
-            });
-            gKeys.forEach((k3) => { total += (grandAnswersBySentence?.[k3]?.length || 0); });
-            return total;
-          } catch (_) { return 0; }
+          const c = childLenMap.get(k2) || 0;
+          const g = grandTotalMap.get(k2) || 0;
+          return c + g;
         };
-        const totalCountL1 = (() => {
+        const totalCountL1 = useMemo(() => {
           try {
-            let total = qaList.length; // depth1
-            const l2Keys = new Set();
-            qaList.forEach((qa) => collectKeysFromAnswer(getAnswerText(qa?.answer)).forEach((k) => l2Keys.add(k)));
-            l2Keys.forEach((k2) => { total += countL2AndL3ForKey(k2); });
+            let total = qaList.length;
+            const set = l2KeysBySentence.get(s) || new Set();
+            set.forEach((k2) => { total += countL2AndL3ForKey(k2); });
             return total;
           } catch (_) { return qaList.length; }
-        })();
+        }, [qaList, l2KeysBySentence, s, childLenMap, grandTotalMap]);
 
         return (
           <View key={idx} onLayout={(e) => onLayoutSentence && onLayoutSentence(s, e.nativeEvent.layout.y)}>
